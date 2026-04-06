@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:9000";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:9000";
 
 export async function getStatus() {
   const res = await fetch(`${API_BASE}/status`);
@@ -62,7 +62,7 @@ export async function streamChat({ question, k = 5, filter = null }, onChunk) {
 }
 
 export async function chatJson({ question, k = 5, filter = null }) {
-  const res = await fetch(`${API_BASE}/chat`, {
+  const res = await fetch(`${API_BASE}/recommendations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, k, filter }),

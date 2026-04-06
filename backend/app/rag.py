@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Dict, Any, List, Optional, Generator, Tuple
 
 from langchain_ollama import OllamaLLM
@@ -25,6 +26,11 @@ User question:
 
 Answer:
 """.strip()
+
+
+@lru_cache(maxsize=1)
+def _get_llm() -> OllamaLLM:
+    return OllamaLLM(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL)
 
 
 def _format_docs(docs: List[Document]) -> str:
@@ -72,9 +78,7 @@ def stream_answer(
     context = _format_docs(docs)
 
     prompt = ChatPromptTemplate.from_template(SYSTEM_TEMPLATE)
-    llm = OllamaLLM(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL)
-
-    chain = prompt | llm
+    chain = prompt | _get_llm()
 
     # Stream chunks
     for chunk in chain.stream({"context": context, "question": question}):
@@ -102,8 +106,7 @@ def answer_json(
     context = _format_docs_with_scores(docs_with_scores)
 
     prompt = ChatPromptTemplate.from_template(SYSTEM_TEMPLATE)
-    llm = OllamaLLM(model=OLLAMA_LLM_MODEL, base_url=OLLAMA_BASE_URL)
-    chain = prompt | llm
+    chain = prompt | _get_llm()
 
     answer = chain.invoke({"context": context, "question": question})
 

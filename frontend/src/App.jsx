@@ -300,7 +300,7 @@ export default function App() {
               onClick={handleAskJson}
               disabled={loading || !question.trim()}
             >
-              {loading ? "Thinking..." : "Ask (JSON)"}
+              {loading ? "Searching..." : "Fast JSON"}
             </button>
             <button
               className="primary"

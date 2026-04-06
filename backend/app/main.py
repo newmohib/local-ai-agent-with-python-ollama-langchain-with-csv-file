@@ -1,3 +1,4 @@
+from time import perf_counter
 from typing import Optional, Dict, Any, List
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -141,12 +142,58 @@ def chat(req: ChatRequest):
     return answer_json(question=req.question, k=req.k, metadata_filter=vector_filter)
 
 
+@app.post("/recommendations")
+def recommendations(req: ChatRequest):
+    vector_filter = build_vector_filter(
+        VECTOR_DB, req.filter.dict(by_alias=True) if req.filter else None
+    )
+    started = perf_counter()
+    results = similarity_search(req.question, k=req.k, metadata_filter=vector_filter)
+    retrieval_ms = round((perf_counter() - started) * 1000, 2)
+
+    recommendations_out: List[Dict[str, Any]] = []
+    citations: List[Dict[str, Any]] = []
+    for d, score in results:
+        md = d.metadata or {}
+        recommendations_out.append(
+            {
+                "parent_asin": md.get("parent_asin"),
+                "title": md.get("title"),
+                "main_category": md.get("main_category"),
+                "store": md.get("store"),
+                "price": md.get("price"),
+                "average_rating": md.get("average_rating"),
+                "rating_number": md.get("rating_number"),
+                "date_first_available": md.get("date_first_available"),
+                "image": md.get("image"),
+                "score": score,
+            }
+        )
+        citations.append(
+            {
+                "parent_asin": md.get("parent_asin"),
+                "score": score,
+                "snippet": (d.page_content or "")[:220],
+            }
+        )
+
+    return {
+        "question": req.question,
+        "answer": "Retrieved matching products without LLM generation.",
+        "recommendations": recommendations_out,
+        "citations": citations,
+        "timing_ms": {"retrieval": retrieval_ms},
+    }
+
+
 @app.post("/search")
 def search(req: SearchRequest):
     vector_filter = build_vector_filter(
         VECTOR_DB, req.filter.dict(by_alias=True) if req.filter else None
     )
+    started = perf_counter()
     results = similarity_search(req.query, k=req.k, metadata_filter=vector_filter)
+    retrieval_ms = round((perf_counter() - started) * 1000, 2)
 
     out: List[Dict[str, Any]] = []
     for d, score in results:
@@ -167,4 +214,8 @@ def search(req: SearchRequest):
             }
         )
 
-    return {"query": req.query, "results": out}
+    return {
+        "query": req.query,
+        "results": out,
+        "timing_ms": {"retrieval": retrieval_ms},
+    }

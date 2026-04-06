@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import sqlite3
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from datasets import load_dataset
@@ -31,6 +32,8 @@ from .config import (
     QDRANT_API_KEY,
     QDRANT_COLLECTION,
     QDRANT_URL,
+    SEARCH_FETCH_MAX,
+    SEARCH_FETCH_MULTIPLIER,
     VECTOR_DB,
 )
 from .filters import coerce_date_iso, coerce_float, coerce_int
@@ -83,6 +86,7 @@ def _db_has_data(path: str) -> bool:
     return os.path.exists(path) and any(os.scandir(path))
 
 
+@lru_cache(maxsize=1)
 def _get_qdrant_client() -> QdrantClient:
     if QDRANT_API_KEY:
         return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
@@ -99,6 +103,8 @@ def _qdrant_has_data() -> bool:
 
 
 def reset_vector_store() -> Dict[str, Any]:
+    get_vector_store.cache_clear()
+    _similarity_search_no_filter_cached.cache_clear()
     if VECTOR_DB == "qdrant":
         client = _get_qdrant_client()
         try:
@@ -118,6 +124,7 @@ def reset_vector_store() -> Dict[str, Any]:
     return {"status": "ok", "reset": False, "vector_db": "chroma", "reason": "missing"}
 
 
+@lru_cache(maxsize=1)
 def get_vector_store() -> VectorStore:
     embeddings = OllamaEmbeddings(model=OLLAMA_EMBED_MODEL, base_url=OLLAMA_BASE_URL)
     if VECTOR_DB == "qdrant":
@@ -341,6 +348,8 @@ def ensure_index(
         vector_store.add_documents(documents=batch, ids=ids)
         indexed_count += len(batch)
 
+    _similarity_search_no_filter_cached.cache_clear()
+
     return {
         "status": "ok",
         "indexed": True,
@@ -416,6 +425,7 @@ def stream_index(
         ids = [d.id for d in batch]
         vector_store.add_documents(documents=batch, ids=ids)
         indexed_count += len(batch)
+        _similarity_search_no_filter_cached.cache_clear()
         yield json.dumps(
             {
                 "event": "batch_indexed",
@@ -520,8 +530,33 @@ def similarity_search(
     k: int = 5,
     metadata_filter: Optional[Dict[str, Any]] = None,
 ) -> List[Tuple[Document, float]]:
+    if metadata_filter is None:
+        return list(_similarity_search_no_filter_cached(query, k))
+
+    return _similarity_search_uncached(
+        query=query,
+        k=k,
+        metadata_filter=metadata_filter,
+    )
+
+
+@lru_cache(maxsize=128)
+def _similarity_search_no_filter_cached(
+    query: str,
+    k: int,
+) -> Tuple[Tuple[Document, float], ...]:
+    return tuple(
+        _similarity_search_uncached(query=query, k=k, metadata_filter=None)
+    )
+
+
+def _similarity_search_uncached(
+    query: str,
+    k: int = 5,
+    metadata_filter: Optional[Dict[str, Any]] = None,
+) -> List[Tuple[Document, float]]:
     vector_store: VectorStore = get_vector_store()
-    fetch_k = max(20, min(80, k * 8))
+    fetch_k = max(k, min(SEARCH_FETCH_MAX, k * SEARCH_FETCH_MULTIPLIER))
     search_kwargs: Dict[str, Any] = {"k": fetch_k}
     if metadata_filter:
         search_kwargs["filter"] = metadata_filter

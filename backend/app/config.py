@@ -23,5 +23,7 @@ DATA_SOURCE = os.getenv("DATA_SOURCE", "csv")
 LOCAL_CSV_PATH = os.getenv("LOCAL_CSV_PATH", "./data/amazon_products.csv")
 INDEX_LIMIT = int(os.getenv("INDEX_LIMIT", "5000"))
 INDEX_BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "10"))
+SEARCH_FETCH_MULTIPLIER = int(os.getenv("SEARCH_FETCH_MULTIPLIER", "4"))
+SEARCH_FETCH_MAX = int(os.getenv("SEARCH_FETCH_MAX", "30"))
 
 FORCE_REINDEX = os.getenv("FORCE_REINDEX", "false").lower() == "true"
