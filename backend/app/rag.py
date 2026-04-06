@@ -66,9 +66,10 @@ def stream_answer(
     question: str,
     k: int = 5,
     metadata_filter: Optional[Dict[str, Any]] = None,
+    filter_obj: Optional[Dict[str, Any]] = None,
 ) -> Generator[str, None, None]:
     docs_with_scores = similarity_search(
-        query=question, k=k, metadata_filter=metadata_filter
+        query=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
     )
     if not docs_with_scores:
         yield "I don't know from the provided products."
@@ -90,9 +91,10 @@ def answer_json(
     question: str,
     k: int = 5,
     metadata_filter: Optional[Dict[str, Any]] = None,
+    filter_obj: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     docs_with_scores = similarity_search(
-        query=question, k=k, metadata_filter=metadata_filter
+        query=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
     )
     if not docs_with_scores:
         return {

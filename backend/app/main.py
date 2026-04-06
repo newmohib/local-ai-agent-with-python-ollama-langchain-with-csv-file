@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from .vector_store import ensure_index, export_hf_to_csv, stream_index
 from .rag import stream_answer, answer_json
-from .filters import build_vector_filter
+from .filters import build_vector_filter, infer_filter_from_query, merge_filter_objects
 from .vector_store import similarity_search, get_index_stats
 from .config import VECTOR_DB
 
@@ -125,10 +125,18 @@ def export_dataset(req: ExportCsvRequest):
 
 @app.post("/chat/stream")
 def chat_stream(req: ChatRequest):
-    vector_filter = build_vector_filter(
-        VECTOR_DB, req.filter.dict(by_alias=True) if req.filter else None
+    explicit_filter = req.filter.dict(by_alias=True) if req.filter else None
+    merged_filter = merge_filter_objects(
+        explicit_filter,
+        infer_filter_from_query(req.question),
     )
-    gen = stream_answer(question=req.question, k=req.k, metadata_filter=vector_filter)
+    vector_filter = build_vector_filter(VECTOR_DB, merged_filter)
+    gen = stream_answer(
+        question=req.question,
+        k=req.k,
+        metadata_filter=vector_filter,
+        filter_obj=merged_filter,
+    )
 
     # Plain text streaming
     return StreamingResponse(gen, media_type="text/plain")
@@ -136,19 +144,35 @@ def chat_stream(req: ChatRequest):
 
 @app.post("/chat")
 def chat(req: ChatRequest):
-    vector_filter = build_vector_filter(
-        VECTOR_DB, req.filter.dict(by_alias=True) if req.filter else None
+    explicit_filter = req.filter.dict(by_alias=True) if req.filter else None
+    merged_filter = merge_filter_objects(
+        explicit_filter,
+        infer_filter_from_query(req.question),
     )
-    return answer_json(question=req.question, k=req.k, metadata_filter=vector_filter)
+    vector_filter = build_vector_filter(VECTOR_DB, merged_filter)
+    return answer_json(
+        question=req.question,
+        k=req.k,
+        metadata_filter=vector_filter,
+        filter_obj=merged_filter,
+    )
 
 
 @app.post("/recommendations")
 def recommendations(req: ChatRequest):
-    vector_filter = build_vector_filter(
-        VECTOR_DB, req.filter.dict(by_alias=True) if req.filter else None
+    explicit_filter = req.filter.dict(by_alias=True) if req.filter else None
+    merged_filter = merge_filter_objects(
+        explicit_filter,
+        infer_filter_from_query(req.question),
     )
+    vector_filter = build_vector_filter(VECTOR_DB, merged_filter)
     started = perf_counter()
-    results = similarity_search(req.question, k=req.k, metadata_filter=vector_filter)
+    results = similarity_search(
+        req.question,
+        k=req.k,
+        metadata_filter=vector_filter,
+        filter_obj=merged_filter,
+    )
     retrieval_ms = round((perf_counter() - started) * 1000, 2)
 
     recommendations_out: List[Dict[str, Any]] = []
@@ -182,17 +206,26 @@ def recommendations(req: ChatRequest):
         "answer": "Retrieved matching products without LLM generation.",
         "recommendations": recommendations_out,
         "citations": citations,
+        "applied_filter": merged_filter,
         "timing_ms": {"retrieval": retrieval_ms},
     }
 
 
 @app.post("/search")
 def search(req: SearchRequest):
-    vector_filter = build_vector_filter(
-        VECTOR_DB, req.filter.dict(by_alias=True) if req.filter else None
+    explicit_filter = req.filter.dict(by_alias=True) if req.filter else None
+    merged_filter = merge_filter_objects(
+        explicit_filter,
+        infer_filter_from_query(req.query),
     )
+    vector_filter = build_vector_filter(VECTOR_DB, merged_filter)
     started = perf_counter()
-    results = similarity_search(req.query, k=req.k, metadata_filter=vector_filter)
+    results = similarity_search(
+        req.query,
+        k=req.k,
+        metadata_filter=vector_filter,
+        filter_obj=merged_filter,
+    )
     retrieval_ms = round((perf_counter() - started) * 1000, 2)
 
     out: List[Dict[str, Any]] = []
@@ -217,5 +250,6 @@ def search(req: SearchRequest):
     return {
         "query": req.query,
         "results": out,
+        "applied_filter": merged_filter,
         "timing_ms": {"retrieval": retrieval_ms},
     }

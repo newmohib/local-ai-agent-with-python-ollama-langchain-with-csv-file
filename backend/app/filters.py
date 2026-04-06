@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Any, Dict, Optional
 
 from dateutil import parser as date_parser
@@ -61,12 +62,12 @@ def build_chroma_filter(filter_obj: Optional[Dict[str, Any]]) -> Optional[Dict[s
     if not filter_obj:
         return None
 
-    out: Dict[str, Any] = {}
+    clauses = []
 
     if filter_obj.get("main_category"):
-        out["main_category"] = filter_obj["main_category"]
+        clauses.append({"main_category": filter_obj["main_category"]})
     if filter_obj.get("store"):
-        out["store"] = filter_obj["store"]
+        clauses.append({"store": filter_obj["store"]})
 
     def _add_range(field: str, min_key: str, max_key: str, coerce_fn):
         range_obj = filter_obj.get(field)
@@ -76,19 +77,21 @@ def build_chroma_filter(filter_obj: Optional[Dict[str, Any]]) -> Optional[Dict[s
         max_val = coerce_fn(range_obj.get(max_key))
         if min_val is None and max_val is None:
             return
-        clause: Dict[str, Any] = {}
         if min_val is not None:
-            clause["$gte"] = min_val
+            clauses.append({field: {"$gte": min_val}})
         if max_val is not None:
-            clause["$lte"] = max_val
-        out[field] = clause
+            clauses.append({field: {"$lte": max_val}})
 
     _add_range("price", "min", "max", coerce_float)
     _add_range("average_rating", "min", "max", coerce_float)
     _add_range("rating_number", "min", "max", coerce_int)
     _add_range("date_first_available", "from", "to", coerce_date_iso)
 
-    return out or None
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
 
 
 def build_qdrant_filter(filter_obj: Optional[Dict[str, Any]]):
@@ -142,3 +145,103 @@ def build_vector_filter(vector_db: str, filter_obj: Optional[Dict[str, Any]]):
     if vector_db == "qdrant":
         return build_qdrant_filter(filter_obj)
     return build_chroma_filter(filter_obj)
+
+
+def _first_float(patterns, text: str) -> Optional[float]:
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+def infer_filter_from_query(query: str) -> Dict[str, Any]:
+    text = (query or "").lower()
+    inferred: Dict[str, Any] = {}
+
+    price: Dict[str, float] = {}
+    price_max = _first_float(
+        [
+            r"(?:under|below|less than)\s*\$\s*(\d+(?:\.\d+)?)",
+            r"(?:maximum|max)\s*price\s*(?:is|of|will be)?\s*\$?\s*(\d+(?:\.\d+)?)",
+            r"price\s*(?:under|below|less than|max|maximum)\s*\$?\s*(\d+(?:\.\d+)?)",
+        ],
+        text,
+    )
+    if price_max is not None:
+        price["max"] = price_max
+
+    price_min = _first_float(
+        [
+            r"(?:minimum|min)\s*price\s*(?:is|of|will be)?\s*\$?\s*(\d+(?:\.\d+)?)",
+            r"price\s*(?:minimum|min|at least|more than|over|above)\s*\$?\s*(\d+(?:\.\d+)?)",
+            r"(?:at least|more than|over|above)\s*\$\s*(\d+(?:\.\d+)?)",
+        ],
+        text,
+    )
+    if price_min is not None:
+        price["min"] = price_min
+
+    if price:
+        inferred["price"] = price
+
+    rating: Dict[str, float] = {}
+    rating_min = _first_float(
+        [
+            r"(?:minimum|min)\s*(?:average\s*)?rating\s*(?:is|of|will be)?\s*(\d(?:\.\d+)?)",
+            r"(?:average\s*)?rating\s*(?:at least|minimum|min|more than|over|above)\s*(\d(?:\.\d+)?)",
+            r"(?:good|high)?\s*ratings?\s*(?:minimum|min|at least|more than|over|above)\s*(\d(?:\.\d+)?)",
+            r"(\d(?:\.\d+)?)\s*\+?\s*(?:star|stars|rating)\s*(?:and up|or up|and above|or above|minimum|min|plus)?",
+        ],
+        text,
+    )
+    if rating_min is not None:
+        rating["min"] = min(rating_min, 5.0)
+
+    rating_max = _first_float(
+        [
+            r"(?:maximum|max)\s*(?:average\s*)?rating\s*(?:is|of|will be)?\s*(\d(?:\.\d+)?)",
+            r"(?:average\s*)?rating\s*(?:under|below|less than|max|maximum)\s*(\d(?:\.\d+)?)",
+        ],
+        text,
+    )
+    if rating_max is not None:
+        rating["max"] = min(rating_max, 5.0)
+
+    if "good rating" in text or "good ratings" in text or "high rating" in text:
+        rating.setdefault("min", 4.0)
+
+    if rating:
+        inferred["average_rating"] = rating
+
+    rating_count: Dict[str, int] = {}
+    rating_count_min = _first_float(
+        [
+            r"(?:minimum|min|at least|more than|over|above)\s*(\d+(?:\.\d+)?)\s*(?:reviews|review|ratings|rating count)",
+            r"(?:reviews|review|rating count)\s*(?:minimum|min|at least|more than|over|above)\s*(\d+(?:\.\d+)?)",
+        ],
+        text,
+    )
+    if rating_count_min is not None:
+        rating_count["min"] = int(rating_count_min)
+
+    if rating_count:
+        inferred["rating_number"] = rating_count
+
+    return inferred
+
+
+def merge_filter_objects(
+    explicit_filter: Optional[Dict[str, Any]],
+    inferred_filter: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    merged: Dict[str, Any] = {}
+    if inferred_filter:
+        merged.update(inferred_filter)
+    if explicit_filter:
+        for key, value in explicit_filter.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key].update(value)
+            else:
+                merged[key] = value
+    return merged or None

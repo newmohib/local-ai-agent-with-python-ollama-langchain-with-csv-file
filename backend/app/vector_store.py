@@ -496,6 +496,39 @@ def _doc_overlap_score(query_tokens: List[str], doc: Document) -> float:
     return matched / float(len(query_tokens))
 
 
+def _matches_range_filter(value: Any, range_filter: Dict[str, Any]) -> bool:
+    numeric_value = coerce_float(value)
+    if numeric_value is None:
+        return False
+    min_val = coerce_float(range_filter.get("min"))
+    max_val = coerce_float(range_filter.get("max"))
+    if min_val is not None and numeric_value < min_val:
+        return False
+    if max_val is not None and numeric_value > max_val:
+        return False
+    return True
+
+
+def _matches_filter_obj(doc: Document, filter_obj: Optional[Dict[str, Any]]) -> bool:
+    if not filter_obj:
+        return True
+
+    md = doc.metadata or {}
+    for field in ("main_category", "store"):
+        expected = filter_obj.get(field)
+        if expected and md.get(field) != expected:
+            return False
+
+    for field in ("price", "average_rating", "rating_number"):
+        range_filter = filter_obj.get(field)
+        if isinstance(range_filter, dict) and not _matches_range_filter(
+            md.get(field), range_filter
+        ):
+            return False
+
+    return True
+
+
 def _rerank_by_lexical_overlap(
     query: str, docs_with_scores: List[Tuple[Document, float]], k: int
 ) -> List[Tuple[Document, float]]:
@@ -529,14 +562,16 @@ def similarity_search(
     query: str,
     k: int = 5,
     metadata_filter: Optional[Dict[str, Any]] = None,
+    filter_obj: Optional[Dict[str, Any]] = None,
 ) -> List[Tuple[Document, float]]:
-    if metadata_filter is None:
+    if metadata_filter is None and filter_obj is None:
         return list(_similarity_search_no_filter_cached(query, k))
 
     return _similarity_search_uncached(
         query=query,
         k=k,
         metadata_filter=metadata_filter,
+        filter_obj=filter_obj,
     )
 
 
@@ -554,6 +589,7 @@ def _similarity_search_uncached(
     query: str,
     k: int = 5,
     metadata_filter: Optional[Dict[str, Any]] = None,
+    filter_obj: Optional[Dict[str, Any]] = None,
 ) -> List[Tuple[Document, float]]:
     vector_store: VectorStore = get_vector_store()
     fetch_k = max(k, min(SEARCH_FETCH_MAX, k * SEARCH_FETCH_MULTIPLIER))
@@ -563,6 +599,12 @@ def _similarity_search_uncached(
 
     # Returns (Document, score)
     docs_with_scores = vector_store.similarity_search_with_score(query, **search_kwargs)
+    if filter_obj:
+        docs_with_scores = [
+            (doc, score)
+            for doc, score in docs_with_scores
+            if _matches_filter_obj(doc, filter_obj)
+        ]
     return _rerank_by_lexical_overlap(query=query, docs_with_scores=docs_with_scores, k=k)
 
 
