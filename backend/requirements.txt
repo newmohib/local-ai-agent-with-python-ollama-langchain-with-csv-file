@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+python-dateutil
+
+langchain
+langchain-core
+langchain-ollama
+langchain-chroma
+langchain-qdrant
+qdrant-client
+
+datasets
+tqdm
