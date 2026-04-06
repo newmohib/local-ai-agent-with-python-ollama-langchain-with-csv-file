@@ -1,57 +1,117 @@
-codex resume 019c855e-6ebf-7602-8546-109a32c7aab1
-# Amazon Products RAG (Local Ollama + Chroma)
+# Amazon Products RAG Search
 
-Starter project for a local RAG app over the HuggingFace Amazon products dataset.
+Local RAG product-search app using:
+
+- FastAPI backend on `PORT=9000`
+- React/Vite frontend on `http://localhost:5173`
+- Ollama for local embeddings and optional chat generation
+- Chroma vector DB by default, with optional Qdrant support
+- Local CSV as the recommended product data source
+
+## How The Data Flow Works
+
+The app does **not** search the CSV file directly for normal queries.
+
+The normal flow is:
+
+1. Export products from HuggingFace into a local CSV file.
+2. Index the CSV rows into the vector DB.
+3. Query `/search` or `/recommendations`; the backend searches the vector DB.
+
+Why this matters:
+
+- The CSV is your source data file.
+- Chroma/Qdrant is the searchable RAG database.
+- Ollama creates embeddings during indexing and also embeds each user query during search.
+- If you update the CSV, re-run indexing with `reset: true` to refresh the vector DB.
 
 ## Requirements
 
 - Python 3.10+
 - Node 18+
 - Ollama running locally
-- Optional: Qdrant (if `VECTOR_DB=qdrant`)
+- Optional: Qdrant if `VECTOR_DB=qdrant`
 
-## Backend setup
+## Ollama Models
+
+Pull the embedding model and LLM model:
+
+```bash
+ollama pull mxbai-embed-large
+ollama pull llama3.2
+```
+
+Model usage:
+
+- `OLLAMA_EMBED_MODEL=mxbai-embed-large` is used for product/query embeddings.
+- `OLLAMA_LLM_MODEL=llama3.2` is used only by `/chat` and `/chat/stream`.
+- `/search` and `/recommendations` are faster because they do retrieval without LLM generation.
+
+## Backend Setup
 
 ```bash
 cd backend
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
 cp .env.example .env
 ```
 
-Start the API:
+Important backend `.env` defaults:
 
 ```bash
-uvicorn app.main:app --reload --port ${PORT:-9000}
+PORT=9000
+VECTOR_DB=chroma
+CHROMA_DIR=./chroma_amazon_db
+COLLECTION_NAME=amazon_products
+DATA_SOURCE=csv
+LOCAL_CSV_PATH=./data/amazon_products.csv
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_EMBED_MODEL=mxbai-embed-large
+OLLAMA_LLM_MODEL=llama3.2
+EMBED_MAX_CHARS=1000
 ```
 
-Or run the helper script:
+Start backend:
 
 ```bash
 cd backend
 ./run.sh
 ```
 
-## Pull Ollama models
+Or manually:
 
 ```bash
-ollama pull llama3.2
-ollama pull mxbai-embed-large
+cd backend
+source venv/bin/activate
+uvicorn app.main:app --reload --port ${PORT:-9000}
 ```
 
-## Optional: Qdrant setup
+Health check:
 
-If you want to use Qdrant instead of Chroma:
+```bash
+curl http://localhost:9000/health
+```
 
-1. Start Qdrant (example using Docker).
+## Vector DB
+
+Default vector DB is Chroma:
+
+```bash
+VECTOR_DB=chroma
+CHROMA_DIR=./chroma_amazon_db
+COLLECTION_NAME=amazon_products
+```
+
+Chroma stores the local vector index under `backend/chroma_amazon_db` when the backend runs from the `backend` directory.
+
+To use Qdrant instead:
 
 ```bash
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant
 ```
 
-2. In `.env`, set:
+Then set in `backend/.env`:
 
 ```bash
 VECTOR_DB=qdrant
@@ -59,16 +119,9 @@ QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=amazon_products
 ```
 
-## Index dataset (first run)
+## Create Local CSV From HuggingFace
 
-The backend is configured to index from a local CSV by default:
-
-```bash
-DATA_SOURCE=csv
-LOCAL_CSV_PATH=./data/amazon_products.csv
-```
-
-Generate a local CSV from the HuggingFace dataset first:
+Recommended API method:
 
 ```bash
 curl -X POST http://localhost:9000/dataset/export \
@@ -76,7 +129,7 @@ curl -X POST http://localhost:9000/dataset/export \
   -d '{"limit": 500, "keyword": "earbuds", "output_path": "./data/amazon_products.csv"}'
 ```
 
-Or generate the same CSV without starting the API:
+Alternative script method:
 
 ```bash
 cd backend
@@ -84,15 +137,17 @@ source venv/bin/activate
 python scripts/export_hf_to_csv.py --limit 500 --keyword earbuds --output ./data/amazon_products.csv
 ```
 
-Then index from the local CSV:
+Generated file:
 
-```bash
-curl -X POST http://localhost:9000/index \
-  -H "Content-Type: application/json" \
-  -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
+```txt
+backend/data/amazon_products.csv
 ```
 
-For long indexing jobs, use the streaming endpoint so curl prints progress:
+`backend/data/` is ignored by Git.
+
+## Index CSV Into RAG DB
+
+Use the streaming endpoint so you can see progress:
 
 ```bash
 curl -N -X POST http://localhost:9000/index/stream \
@@ -100,42 +155,49 @@ curl -N -X POST http://localhost:9000/index/stream \
   -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
 ```
 
-Check index status:
+Non-streaming version:
+
+```bash
+curl -X POST http://localhost:9000/index \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
+```
+
+Notes:
+
+- `data_source: "csv"` tells backend to read rows from the local CSV.
+- `csv_path: "./data/amazon_products.csv"` is relative to the backend process working directory.
+- `reset: true` clears the old vector index before indexing the CSV.
+- `batch_size: 10` avoids very large embedding requests to Ollama.
+
+Check vector DB status:
 
 ```bash
 curl http://localhost:9000/status
 ```
 
-You can still index directly from HuggingFace if needed, but local CSV is the recommended path:
+Expected response shape:
 
-```bash
-curl -X POST http://localhost:9000/index \
-  -H "Content-Type: application/json" \
-  -d '{"limit": 500, "keyword": "earbuds", "data_source": "hf"}'
+```json
+{
+  "vector_db": "chroma",
+  "collection": "amazon_products",
+  "count": 500,
+  "persist_directory": "./chroma_amazon_db"
+}
 ```
 
-Use this query after indexing:
+## Query Indexed CSV Data
+
+After indexing, query the vector DB with `/search`:
 
 ```bash
 curl -X POST http://localhost:9000/search \
   -H "Content-Type: application/json" \
   -d '{"query": "wireless earbuds under $50 with good ratings", "k": 5}'
 ```
-- wireless earbuds under $50 with maximum ratings
-- wireless earbuds under $50 with average ratings
-- wireless earbuds with minimum rating and maximum pricing but price do not will be empty, zero, null
-- wireless earbuds with maximum rating and pricing but price do not will be empty, zero, null
-## Streaming chat
 
-```bash
-curl -N -X POST http://localhost:9000/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"question": "wireless earbuds under $50 with good ratings", "k": 5}'
-```
-
-## JSON chat (structured + citations)
-
-Fast JSON recommendations without LLM generation:
+Fast structured recommendations without LLM generation:
 
 ```bash
 curl -X POST http://localhost:9000/recommendations \
@@ -143,7 +205,7 @@ curl -X POST http://localhost:9000/recommendations \
   -d '{"question": "wireless earbuds under $50 with good ratings", "k": 5}'
 ```
 
-LLM-generated JSON chat is slower because it calls the local Ollama LLM:
+LLM-generated answer, slower because it calls Ollama LLM:
 
 ```bash
 curl -X POST http://localhost:9000/chat \
@@ -151,71 +213,43 @@ curl -X POST http://localhost:9000/chat \
   -d '{"question": "wireless earbuds under $50 with good ratings", "k": 5}'
 ```
 
-## Quick query examples
-
-```bash
-# Basic search
-curl -X POST http://localhost:9000/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "wireless earbuds", "k": 5}'
-```
-
-```bash
-# Chat with category + price + rating filters
-curl -X POST http://localhost:9000/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "best budget headphones for commuting",
-    "k": 5,
-    "filter": {
-      "main_category": "Electronics",
-      "price": {"max": 60},
-      "average_rating": {"min": 4.2},
-      "rating_number": {"min": 200}
-    }
-  }'
-```
-
-```bash
-# Search with date range
-curl -X POST http://localhost:9000/search \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "kitchen knife set",
-    "k": 5,
-    "filter": {
-      "date_first_available": {"from": "2021-01-01", "to": "2024-12-31"}
-    }
-  }'
-```
-
-With simple filters:
+Streaming LLM answer:
 
 ```bash
 curl -N -X POST http://localhost:9000/chat/stream \
   -H "Content-Type: application/json" \
-  -d '{"question": "wireless earbuds under $50", "k": 5, "filter": {"main_category": "Electronics"}}'
+  -d '{"question": "wireless earbuds under $50 with good ratings", "k": 5}'
 ```
 
-With numeric/date range filters:
+## Query Examples
+
+Natural language filters are inferred by backend:
 
 ```bash
-curl -X POST http://localhost:9000/chat \
+curl -X POST http://localhost:9000/search \
   -H "Content-Type: application/json" \
-  -d '{
-    "question": "wireless earbuds under $50 with good ratings",
-    "k": 5,
-    "filter": {
-      "main_category": "Electronics",
-      "price": {"min": 10, "max": 50},
-      "average_rating": {"min": 4.0},
-      "rating_number": {"min": 200},
-      "date_first_available": {"from": "2022-01-01", "to": "2024-12-31"}
-    }
-  }'
+  -d '{"query": "wireless earbuds under $50 with good ratings and minimum price is $10", "k": 5}'
 ```
 
-## Search (top-k + scores)
+```bash
+curl -X POST http://localhost:9000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "wireless earbuds under $50 minimum rating 4.5", "k": 5}'
+```
+
+```bash
+curl -X POST http://localhost:9000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "wireless earbuds with lower ratings", "k": 5}'
+```
+
+```bash
+curl -X POST http://localhost:9000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "wireless earbuds with maximum price and ratings but price do not will be empty, zero, null", "k": 5}'
+```
+
+You can also pass explicit structured filters:
 
 ```bash
 curl -X POST http://localhost:9000/search \
@@ -223,11 +257,16 @@ curl -X POST http://localhost:9000/search \
   -d '{
     "query": "wireless earbuds",
     "k": 5,
-    "filter": {"main_category": "Electronics"}
+    "filter": {
+      "main_category": "Electronics",
+      "price": {"min": 10, "max": 50},
+      "average_rating": {"min": 4.5},
+      "rating_number": {"min": 100}
+    }
   }'
 ```
 
-## Frontend setup
+## Frontend Setup
 
 ```bash
 cd frontend
@@ -236,39 +275,76 @@ cp .env.example .env
 npm run dev
 ```
 
-The frontend uses `VITE_API_BASE` (default `http://localhost:9000` if not set).
+Frontend `.env`:
 
 ```bash
-VITE_API_BASE=http://localhost:9000
+VITE_API_BASE=http://127.0.0.1:9000
 ```
 
-Open `http://localhost:5173`.
+Open:
 
-Or run the helper script:
+```txt
+http://localhost:5173
+```
+
+Or run helper script:
 
 ```bash
 cd frontend
 ./run.sh
 ```
 
-## Endpoints
+Frontend supports:
+
+- Export HuggingFace data to CSV.
+- Index local CSV into vector DB.
+- Fast JSON recommendations.
+- Search result cards.
+- Copy JSON.
+- Status panel showing active vector DB and count.
+
+## API Endpoints
 
 - `GET /health`
 - `GET /status`
 - `POST /dataset/export`
 - `POST /index`
 - `POST /index/stream`
-- `POST /chat/stream`
-- `POST /chat`
-- `POST /recommendations`
 - `POST /search`
+- `POST /recommendations`
+- `POST /chat`
+- `POST /chat/stream`
 
-## Notes
+## Troubleshooting
 
-- First indexing will take time because embeddings are generated locally.
-- `/index` returns only after all embeddings finish. Use `/index/stream` with `curl -N` to see indexing progress.
-- Use `"reset": true` when rebuilding from a new CSV so old Chroma rows do not pollute search results.
-- `/search` and `/recommendations` are retrieval-only and should be fast. `/chat` and `/chat/stream` call the local LLM and will be slower.
-- Filters support equality and numeric/date ranges for `price`, `average_rating`, `rating_number`, and `date_first_available`.
-- If you indexed before these filter changes, delete the Chroma directory or set `FORCE_REINDEX=true` to rebuild with numeric/date metadata.
-- If Ollama returns `input length exceeds the context length`, set `EMBED_MAX_CHARS=1000` in `backend/.env`, restart the backend, and reindex.
+If search returns empty results:
+
+```bash
+curl http://localhost:9000/status
+```
+
+If count is `0` or old data is still present, reindex with `reset: true`:
+
+```bash
+curl -N -X POST http://localhost:9000/index/stream \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
+```
+
+If indexing fails with Ollama context-length errors, lower this in `backend/.env`:
+
+```bash
+EMBED_MAX_CHARS=1000
+```
+
+If frontend cannot reach backend, confirm:
+
+```bash
+curl http://localhost:9000/health
+```
+
+And confirm frontend env:
+
+```bash
+VITE_API_BASE=http://127.0.0.1:9000
+```
