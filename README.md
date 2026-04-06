@@ -1,4 +1,4 @@
-codex resume 019c855e-6ebf-7602-8546-109a32c7aab1
+
 # Amazon Products RAG (Local Ollama + Chroma)
 
 Starter project for a local RAG app over the HuggingFace Amazon products dataset.
