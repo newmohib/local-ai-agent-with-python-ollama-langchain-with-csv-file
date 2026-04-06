@@ -1,3 +1,5 @@
+# git rm -r --cached --ignore-unmatch backend/venv frontend/node_modules backend/chroma_amazon_db backend/app/__pycache__ backend/.env frontend/.env git status --short
+
 # Environment files
 .env
 .env.*
