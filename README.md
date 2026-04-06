@@ -1,4 +1,4 @@
-
+codex resume 019c855e-6ebf-7602-8546-109a32c7aab1
 # Amazon Products RAG (Local Ollama + Chroma)
 
 Starter project for a local RAG app over the HuggingFace Amazon products dataset.
@@ -132,6 +132,16 @@ curl -N -X POST http://localhost:9000/chat/stream \
 
 ## JSON chat (structured + citations)
 
+Fast JSON recommendations without LLM generation:
+
+```bash
+curl -X POST http://localhost:9000/recommendations \
+  -H "Content-Type: application/json" \
+  -d '{"question": "wireless earbuds under $50 with good ratings", "k": 5}'
+```
+
+LLM-generated JSON chat is slower because it calls the local Ollama LLM:
+
 ```bash
 curl -X POST http://localhost:9000/chat \
   -H "Content-Type: application/json" \
@@ -247,6 +257,7 @@ cd frontend
 - `POST /index/stream`
 - `POST /chat/stream`
 - `POST /chat`
+- `POST /recommendations`
 - `POST /search`
 
 ## Notes
@@ -254,6 +265,7 @@ cd frontend
 - First indexing will take time because embeddings are generated locally.
 - `/index` returns only after all embeddings finish. Use `/index/stream` with `curl -N` to see indexing progress.
 - Use `"reset": true` when rebuilding from a new CSV so old Chroma rows do not pollute search results.
+- `/search` and `/recommendations` are retrieval-only and should be fast. `/chat` and `/chat/stream` call the local LLM and will be slower.
 - Filters support equality and numeric/date ranges for `price`, `average_rating`, `rating_number`, and `date_first_available`.
 - If you indexed before these filter changes, delete the Chroma directory or set `FORCE_REINDEX=true` to rebuild with numeric/date metadata.
 - If Ollama returns `input length exceeds the context length`, set `EMBED_MAX_CHARS=1000` in `backend/.env`, restart the backend, and reindex.
