@@ -1,5 +1,9 @@
+import csv
+import json
 import os
 import re
+import shutil
+import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
 from datasets import load_dataset
@@ -14,11 +18,14 @@ from tqdm import tqdm
 from .config import (
     CHROMA_DIR,
     COLLECTION_NAME,
+    DATA_SOURCE,
     EMBED_MAX_CHARS,
     FORCE_REINDEX,
     HF_DATASET_ID,
     HF_SPLIT,
+    INDEX_BATCH_SIZE,
     INDEX_LIMIT,
+    LOCAL_CSV_PATH,
     OLLAMA_BASE_URL,
     OLLAMA_EMBED_MODEL,
     QDRANT_API_KEY,
@@ -27,6 +34,22 @@ from .config import (
     VECTOR_DB,
 )
 from .filters import coerce_date_iso, coerce_float, coerce_int
+
+CSV_FIELDS = [
+    "parent_asin",
+    "title",
+    "description",
+    "features",
+    "main_category",
+    "store",
+    "average_rating",
+    "rating_number",
+    "price",
+    "date_first_available",
+    "image",
+]
+
+SAFE_EMBED_MAX_CHARS = 1000
 
 _STOPWORDS = {
     "a",
@@ -75,6 +98,26 @@ def _qdrant_has_data() -> bool:
     return info.points_count > 0
 
 
+def reset_vector_store() -> Dict[str, Any]:
+    if VECTOR_DB == "qdrant":
+        client = _get_qdrant_client()
+        try:
+            client.delete_collection(QDRANT_COLLECTION)
+        except Exception as exc:
+            return {
+                "status": "ok",
+                "reset": False,
+                "vector_db": "qdrant",
+                "reason": str(exc),
+            }
+        return {"status": "ok", "reset": True, "vector_db": "qdrant"}
+
+    if os.path.exists(CHROMA_DIR):
+        shutil.rmtree(CHROMA_DIR)
+        return {"status": "ok", "reset": True, "vector_db": "chroma"}
+    return {"status": "ok", "reset": False, "vector_db": "chroma", "reason": "missing"}
+
+
 def get_vector_store() -> VectorStore:
     embeddings = OllamaEmbeddings(model=OLLAMA_EMBED_MODEL, base_url=OLLAMA_BASE_URL)
     if VECTOR_DB == "qdrant":
@@ -102,8 +145,9 @@ def _build_document_from_row(row: Dict[str, Any], fallback_id: str) -> Optional[
 
     # Main searchable text
     page_content = " ".join([title, desc, features_text]).strip()
-    if EMBED_MAX_CHARS > 0 and len(page_content) > EMBED_MAX_CHARS:
-        page_content = page_content[:EMBED_MAX_CHARS]
+    max_chars = min(EMBED_MAX_CHARS, SAFE_EMBED_MAX_CHARS)
+    if max_chars > 0 and len(page_content) > max_chars:
+        page_content = page_content[:max_chars]
 
     # Skip empty text rows
     if not page_content:
@@ -153,12 +197,94 @@ def _matches_keyword(row: Dict[str, Any], keyword: str) -> bool:
     return keyword.lower() in haystack
 
 
-def build_documents(limit: int, keyword: Optional[str] = None) -> List[Document]:
-    docs: List[Document] = []
-    # return docs
+def _row_for_csv(row: Dict[str, Any]) -> Dict[str, Any]:
+    csv_row: Dict[str, Any] = {}
+    for field in CSV_FIELDS:
+        value = row.get(field)
+        if isinstance(value, (list, dict)):
+            csv_row[field] = json.dumps(value, ensure_ascii=False)
+        elif value is None:
+            csv_row[field] = ""
+        else:
+            csv_row[field] = value
+    return csv_row
+
+
+def _row_from_csv(row: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(row)
+    features = out.get("features")
+    if features:
+        try:
+            parsed = json.loads(features)
+            out["features"] = parsed
+        except json.JSONDecodeError:
+            out["features"] = features
+    return out
+
+
+def export_hf_to_csv(
+    output_path: Optional[str] = None,
+    limit: Optional[int] = None,
+    keyword: Optional[str] = None,
+) -> Dict[str, Any]:
+    path = output_path or LOCAL_CSV_PATH
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
     ds = load_dataset(HF_DATASET_ID, split=HF_SPLIT)
+    max_rows = limit if (limit and limit > 0) else None
+    written = 0
+
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        for row in tqdm(ds, desc="Exporting CSV"):
+            if keyword and not _matches_keyword(row, keyword):
+                continue
+            writer.writerow(_row_for_csv(row))
+            written += 1
+            if max_rows is not None and written >= max_rows:
+                break
+
+    return {
+        "status": "ok",
+        "path": path,
+        "count": written,
+        "limit": limit,
+        "keyword": keyword,
+    }
+
+
+def _iter_csv_rows(csv_path: str):
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(
+            f"CSV file not found: {csv_path}. Generate it with POST /dataset/export."
+        )
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            yield _row_from_csv(row)
+
+
+def build_documents(
+    limit: int,
+    keyword: Optional[str] = None,
+    data_source: Optional[str] = None,
+    csv_path: Optional[str] = None,
+) -> List[Document]:
+    docs: List[Document] = []
+    source = data_source or DATA_SOURCE
     max_docs = limit if (limit and limit > 0) else None
-    for i, row in enumerate(tqdm(ds, desc="Building Documents")):
+
+    if source == "csv":
+        rows = _iter_csv_rows(csv_path or LOCAL_CSV_PATH)
+        desc = "Building Documents from CSV"
+    elif source == "hf":
+        rows = load_dataset(HF_DATASET_ID, split=HF_SPLIT)
+        desc = "Building Documents from HuggingFace"
+    else:
+        raise ValueError(f"Unsupported DATA_SOURCE: {source}. Use 'csv' or 'hf'.")
+
+    for i, row in enumerate(tqdm(rows, desc=desc)):
         if keyword and not _matches_keyword(row, keyword):
             continue
         doc = _build_document_from_row(row=row, fallback_id=str(i))
@@ -171,8 +297,16 @@ def build_documents(limit: int, keyword: Optional[str] = None) -> List[Document]
     return docs
 
 
-def ensure_index(limit: Optional[int] = None, keyword: Optional[str] = None) -> Dict[str, Any]:
+def ensure_index(
+    limit: Optional[int] = None,
+    keyword: Optional[str] = None,
+    data_source: Optional[str] = None,
+    csv_path: Optional[str] = None,
+    batch_size: Optional[int] = None,
+    reset: bool = False,
+) -> Dict[str, Any]:
     limit = limit if limit is not None else INDEX_LIMIT
+    reset_result = reset_vector_store() if reset else None
     vector_store = get_vector_store()
 
     if keyword:
@@ -184,7 +318,12 @@ def ensure_index(limit: Optional[int] = None, keyword: Optional[str] = None) -> 
     if not should_add:
         return {"status": "ok", "indexed": False, "reason": "db_exists"}
 
-    docs = build_documents(limit=limit, keyword=keyword)
+    docs = build_documents(
+        limit=limit,
+        keyword=keyword,
+        data_source=data_source,
+        csv_path=csv_path,
+    )
     if not docs:
         return {
             "status": "ok",
@@ -194,17 +333,112 @@ def ensure_index(limit: Optional[int] = None, keyword: Optional[str] = None) -> 
             "keyword": keyword,
         }
 
-    # Chroma add_documents uses embeddings internally (Ollama) => may take time.
-    ids = [d.id for d in docs]
-    vector_store.add_documents(documents=docs, ids=ids)
+    batch_size = batch_size or INDEX_BATCH_SIZE
+    indexed_count = 0
+    for i in range(0, len(docs), batch_size):
+        batch = docs[i : i + batch_size]
+        ids = [d.id for d in batch]
+        vector_store.add_documents(documents=batch, ids=ids)
+        indexed_count += len(batch)
 
     return {
         "status": "ok",
         "indexed": True,
-        "count": len(docs),
+        "count": indexed_count,
         "limit": limit,
         "keyword": keyword,
+        "data_source": data_source or DATA_SOURCE,
+        "csv_path": csv_path or LOCAL_CSV_PATH,
+        "batch_size": batch_size,
+        "reset": reset_result,
+        "embed_max_chars": min(EMBED_MAX_CHARS, SAFE_EMBED_MAX_CHARS),
     }
+
+
+def stream_index(
+    limit: Optional[int] = None,
+    keyword: Optional[str] = None,
+    data_source: Optional[str] = None,
+    csv_path: Optional[str] = None,
+    batch_size: Optional[int] = None,
+    reset: bool = False,
+):
+    limit = limit if limit is not None else INDEX_LIMIT
+    batch_size = batch_size or INDEX_BATCH_SIZE
+    if reset:
+        yield json.dumps({"event": "reset", **reset_vector_store()}) + "\n"
+    vector_store = get_vector_store()
+
+    yield json.dumps({"event": "building_documents", "limit": limit}) + "\n"
+    docs = build_documents(
+        limit=limit,
+        keyword=keyword,
+        data_source=data_source,
+        csv_path=csv_path,
+    )
+
+    if not docs:
+        yield json.dumps(
+            {
+                "event": "complete",
+                "status": "ok",
+                "indexed": False,
+                "reason": "no_matching_rows",
+                "limit": limit,
+                "keyword": keyword,
+            }
+        ) + "\n"
+        return
+
+    yield json.dumps(
+        {
+            "event": "documents_built",
+            "count": len(docs),
+            "batch_size": batch_size,
+            "data_source": data_source or DATA_SOURCE,
+            "csv_path": csv_path or LOCAL_CSV_PATH,
+        }
+    ) + "\n"
+
+    indexed_count = 0
+    for i in range(0, len(docs), batch_size):
+        batch = docs[i : i + batch_size]
+        batch_number = (i // batch_size) + 1
+        yield json.dumps(
+            {
+                "event": "indexing_batch",
+                "batch": batch_number,
+                "from": i + 1,
+                "to": i + len(batch),
+                "total": len(docs),
+            }
+        ) + "\n"
+        ids = [d.id for d in batch]
+        vector_store.add_documents(documents=batch, ids=ids)
+        indexed_count += len(batch)
+        yield json.dumps(
+            {
+                "event": "batch_indexed",
+                "batch": batch_number,
+                "indexed": indexed_count,
+                "total": len(docs),
+            }
+        ) + "\n"
+
+    yield json.dumps(
+        {
+            "event": "complete",
+            "status": "ok",
+            "indexed": True,
+            "count": indexed_count,
+            "limit": limit,
+            "keyword": keyword,
+            "data_source": data_source or DATA_SOURCE,
+            "csv_path": csv_path or LOCAL_CSV_PATH,
+            "batch_size": batch_size,
+            "embed_max_chars": min(EMBED_MAX_CHARS, SAFE_EMBED_MAX_CHARS),
+        }
+    ) + "\n"
 
 
 def make_retriever(
@@ -221,7 +455,13 @@ def make_retriever(
 
 
 def _tokenize(text: str) -> List[str]:
-    return re.findall(r"[a-z0-9]+", (text or "").lower())
+    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
+    normalized = []
+    for token in tokens:
+        if len(token) > 3 and token.endswith("s"):
+            token = token[:-1]
+        normalized.append(token)
+    return normalized
 
 
 def _query_tokens(query: str) -> List[str]:
@@ -310,12 +550,17 @@ def get_index_stats() -> Dict[str, Any]:
                 "url": QDRANT_URL,
             }
 
-    store = get_vector_store()
     count = None
-    try:
-        count = store._collection.count()
-    except Exception:
-        count = None
+    sqlite_path = os.path.join(CHROMA_DIR, "chroma.sqlite3")
+    if os.path.exists(sqlite_path):
+        try:
+            con = sqlite3.connect(sqlite_path, timeout=1)
+            try:
+                count = con.execute("select count(*) from embeddings").fetchone()[0]
+            finally:
+                con.close()
+        except Exception:
+            count = None
 
     return {
         "vector_db": "chroma",

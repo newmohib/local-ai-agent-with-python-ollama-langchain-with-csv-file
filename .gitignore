@@ -1,15 +1,16 @@
 # git rm -r --cached --ignore-unmatch backend/venv frontend/node_modules backend/chroma_amazon_db backend/app/__pycache__ backend/.env frontend/.env git status --short
+# git rm -r --cached --ignore-unmatch backend/venv frontend/node_modules backend/chroma_amazon_db backend/app/__pycache__  git status --short
 
 # Environment files
-.env
-.env.*
-!.env.example
-backend/.env
-backend/.env.*
-!backend/.env.example
-frontend/.env
-frontend/.env.*
-!frontend/.env.example
+# .env
+# .env.*
+# !.env.example
+# backend/.env
+# backend/.env.*
+# !backend/.env.example
+# frontend/.env
+# frontend/.env.*
+# !frontend/.env.example
 
 # Python
 __pycache__/
@@ -42,6 +43,7 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Local vector databases and generated data
+# backend/data/
 chroma_amazon_db/
 backend/chroma_amazon_db/
 qdrant_storage/

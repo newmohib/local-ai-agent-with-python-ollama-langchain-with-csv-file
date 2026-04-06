@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from .vector_store import ensure_index
+from .vector_store import ensure_index, export_hf_to_csv, stream_index
 from .rag import stream_answer, answer_json
 from .filters import build_vector_filter
 from .vector_store import similarity_search, get_index_stats
@@ -37,8 +37,7 @@ class DateRange(BaseModel):
     from_: Optional[str] = Field(default=None, alias="from")
     to: Optional[str] = None
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = {"validate_by_name": True}
 
 
 class FilterModel(BaseModel):
@@ -51,6 +50,16 @@ class FilterModel(BaseModel):
 
 
 class IndexRequest(BaseModel):
+    limit: Optional[int] = None
+    keyword: Optional[str] = None
+    data_source: Optional[str] = None
+    csv_path: Optional[str] = None
+    batch_size: Optional[int] = None
+    reset: bool = False
+
+
+class ExportCsvRequest(BaseModel):
+    output_path: Optional[str] = None
     limit: Optional[int] = None
     keyword: Optional[str] = None
 
@@ -79,7 +88,38 @@ def status():
 @app.post("/index")
 def index(req: IndexRequest):
     keyword = req.keyword.strip() if req.keyword else None
-    return ensure_index(limit=req.limit, keyword=keyword)
+    return ensure_index(
+        limit=req.limit,
+        keyword=keyword,
+        data_source=req.data_source,
+        csv_path=req.csv_path,
+        batch_size=req.batch_size,
+        reset=req.reset,
+    )
+
+
+@app.post("/index/stream")
+def index_stream(req: IndexRequest):
+    keyword = req.keyword.strip() if req.keyword else None
+    gen = stream_index(
+        limit=req.limit,
+        keyword=keyword,
+        data_source=req.data_source,
+        csv_path=req.csv_path,
+        batch_size=req.batch_size,
+        reset=req.reset,
+    )
+    return StreamingResponse(gen, media_type="application/x-ndjson")
+
+
+@app.post("/dataset/export")
+def export_dataset(req: ExportCsvRequest):
+    keyword = req.keyword.strip() if req.keyword else None
+    return export_hf_to_csv(
+        output_path=req.output_path,
+        limit=req.limit,
+        keyword=keyword,
+    )
 
 
 @app.post("/chat/stream")

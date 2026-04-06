@@ -6,11 +6,37 @@ export async function getStatus() {
   return res.json();
 }
 
-export async function indexDataset(limit = 5000) {
+export async function exportDataset({
+  limit = 500,
+  keyword = "earbuds",
+  outputPath = "./data/amazon_products.csv",
+} = {}) {
+  const res = await fetch(`${API_BASE}/dataset/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit, keyword, output_path: outputPath }),
+  });
+  if (!res.ok) throw new Error("Dataset export failed");
+  return res.json();
+}
+
+export async function indexDataset({
+  limit = 500,
+  keyword = "earbuds",
+  dataSource = "csv",
+  csvPath = "./data/amazon_products.csv",
+} = {}) {
   const res = await fetch(`${API_BASE}/index`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ limit }),
+    body: JSON.stringify({
+      limit,
+      keyword,
+      data_source: dataSource,
+      csv_path: csvPath,
+      batch_size: 10,
+      reset: true,
+    }),
   });
   if (!res.ok) throw new Error("Index failed");
   return res.json();

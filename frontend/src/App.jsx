@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
+  exportDataset,
   indexDataset,
   streamChat,
   chatJson,
@@ -18,6 +19,9 @@ export default function App() {
   const [activeMode, setActiveMode] = useState("stream");
   const [status, setStatus] = useState(null);
   const [statusError, setStatusError] = useState("");
+  const [indexKeyword, setIndexKeyword] = useState("earbuds");
+  const [indexLimit, setIndexLimit] = useState(500);
+  const [csvPath, setCsvPath] = useState("./data/amazon_products.csv");
 
   // simple filters
   const [category, setCategory] = useState("");
@@ -53,9 +57,34 @@ export default function App() {
     setJsonAnswer(null);
     setJsonSearch(null);
     try {
-      const out = await indexDataset(5000);
+      const out = await indexDataset({
+        limit: Number(indexLimit),
+        keyword: indexKeyword.trim() || null,
+        dataSource: "csv",
+        csvPath,
+      });
       setAnswer(`Index result: ${JSON.stringify(out, null, 2)}`);
       await refreshStatus();
+    } catch (e) {
+      setAnswer(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleExportCsv() {
+    setLoading(true);
+    setAnswer("");
+    setSearchResults("");
+    setJsonAnswer(null);
+    setJsonSearch(null);
+    try {
+      const out = await exportDataset({
+        limit: Number(indexLimit),
+        keyword: indexKeyword.trim() || null,
+        outputPath: csvPath,
+      });
+      setAnswer(`CSV export result: ${JSON.stringify(out, null, 2)}`);
     } catch (e) {
       setAnswer(String(e));
     } finally {
@@ -192,9 +221,6 @@ export default function App() {
           </div>
         </div>
         <div className="hero-actions">
-          <button className="ghost" onClick={handleIndex} disabled={loading}>
-            {loading ? "Working..." : "Index Dataset (limit 5000)"}
-          </button>
           <button className="ghost" onClick={refreshStatus} disabled={loading}>
             Refresh Status
           </button>
@@ -205,6 +231,40 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2>Local CSV</h2>
+          <div className="hint">Export from HuggingFace once, then index from CSV</div>
+        </div>
+        <div className="grid">
+          <input
+            value={indexKeyword}
+            onChange={(e) => setIndexKeyword(e.target.value)}
+            placeholder="Dataset keyword"
+          />
+          <input
+            type="number"
+            min={1}
+            value={indexLimit}
+            onChange={(e) => setIndexLimit(e.target.value)}
+            placeholder="Limit"
+          />
+          <input
+            value={csvPath}
+            onChange={(e) => setCsvPath(e.target.value)}
+            placeholder="CSV path"
+          />
+        </div>
+        <div className="actions space-top">
+          <button className="ghost" onClick={handleExportCsv} disabled={loading}>
+            {loading ? "Working..." : "Export CSV"}
+          </button>
+          <button className="ghost" onClick={handleIndex} disabled={loading}>
+            {loading ? "Working..." : "Index CSV"}
+          </button>
+        </div>
+      </section>
 
       <section className="panel">
         <div className="panel-head">

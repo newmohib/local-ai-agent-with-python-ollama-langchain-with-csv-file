@@ -61,26 +61,65 @@ QDRANT_COLLECTION=amazon_products
 
 ## Index dataset (first run)
 
+The backend is configured to index from a local CSV by default:
+
 ```bash
-curl -X POST http://localhost:9000/index \
-  -H "Content-Type: application/json" \
-  -d '{"limit": 5000}'
+DATA_SOURCE=csv
+LOCAL_CSV_PATH=./data/amazon_products.csv
 ```
 
-For a quicker test:
+Generate a local CSV from the HuggingFace dataset first:
 
 ```bash
-curl -X POST http://localhost:9000/index \
+curl -X POST http://localhost:9000/dataset/export \
   -H "Content-Type: application/json" \
-  -d '{"limit": 1000}'
+  -d '{"limit": 500, "keyword": "earbuds", "output_path": "./data/amazon_products.csv"}'
 ```
 
-Index only earbuds-related products from HuggingFace:
+Or generate the same CSV without starting the API:
+
+```bash
+cd backend
+source venv/bin/activate
+python scripts/export_hf_to_csv.py --limit 500 --keyword earbuds --output ./data/amazon_products.csv
+```
+
+Then index from the local CSV:
 
 ```bash
 curl -X POST http://localhost:9000/index \
   -H "Content-Type: application/json" \
-  -d '{"limit": 500, "keyword": "earbuds"}'
+  -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
+```
+
+For long indexing jobs, use the streaming endpoint so curl prints progress:
+
+```bash
+curl -N -X POST http://localhost:9000/index/stream \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
+```
+
+Check index status:
+
+```bash
+curl http://localhost:9000/status
+```
+
+You can still index directly from HuggingFace if needed, but local CSV is the recommended path:
+
+```bash
+curl -X POST http://localhost:9000/index \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 500, "keyword": "earbuds", "data_source": "hf"}'
+```
+
+Use this query after indexing:
+
+```bash
+curl -X POST http://localhost:9000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "wireless earbuds under $50 with good ratings", "k": 5}'
 ```
 
 ## Streaming chat
@@ -203,7 +242,9 @@ cd frontend
 
 - `GET /health`
 - `GET /status`
+- `POST /dataset/export`
 - `POST /index`
+- `POST /index/stream`
 - `POST /chat/stream`
 - `POST /chat`
 - `POST /search`
@@ -211,6 +252,8 @@ cd frontend
 ## Notes
 
 - First indexing will take time because embeddings are generated locally.
+- `/index` returns only after all embeddings finish. Use `/index/stream` with `curl -N` to see indexing progress.
+- Use `"reset": true` when rebuilding from a new CSV so old Chroma rows do not pollute search results.
 - Filters support equality and numeric/date ranges for `price`, `average_rating`, `rating_number`, and `date_first_available`.
 - If you indexed before these filter changes, delete the Chroma directory or set `FORCE_REINDEX=true` to rebuild with numeric/date metadata.
-- If Ollama returns `input length exceeds the context length`, reduce `EMBED_MAX_CHARS` in `backend/.env` (default `3500`) and reindex.
+- If Ollama returns `input length exceeds the context length`, set `EMBED_MAX_CHARS=1000` in `backend/.env`, restart the backend, and reindex.

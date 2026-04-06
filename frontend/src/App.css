@@ -149,6 +149,10 @@ input:focus {
   flex-wrap: wrap;
 }
 
+.space-top {
+  margin-top: 12px;
+}
+
 button {
   border: none;
   border-radius: 12px;
