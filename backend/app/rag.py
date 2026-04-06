@@ -6,7 +6,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 
 from .config import OLLAMA_LLM_MODEL, OLLAMA_BASE_URL
-from .vector_store import similarity_search
+from .vector_store import metadata_sorted_search, rating_sort_direction, similarity_search
 
 
 SYSTEM_TEMPLATE = """
@@ -62,14 +62,32 @@ def _format_docs_with_scores(docs_with_scores: List[Tuple[Document, float]]) -> 
     return "\n\n".join(lines)
 
 
+def _retrieve_docs(
+    question: str,
+    k: int,
+    metadata_filter: Optional[Dict[str, Any]],
+    filter_obj: Optional[Dict[str, Any]],
+) -> List[Tuple[Document, float]]:
+    sort_direction = rating_sort_direction(question)
+    if sort_direction or (filter_obj or {}).get("price_sort"):
+        return metadata_sorted_search(
+            question,
+            k=k,
+            filter_obj=filter_obj,
+        )
+    return similarity_search(
+        query=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
+    )
+
+
 def stream_answer(
     question: str,
     k: int = 5,
     metadata_filter: Optional[Dict[str, Any]] = None,
     filter_obj: Optional[Dict[str, Any]] = None,
 ) -> Generator[str, None, None]:
-    docs_with_scores = similarity_search(
-        query=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
+    docs_with_scores = _retrieve_docs(
+        question=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
     )
     if not docs_with_scores:
         yield "I don't know from the provided products."
@@ -93,8 +111,8 @@ def answer_json(
     metadata_filter: Optional[Dict[str, Any]] = None,
     filter_obj: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    docs_with_scores = similarity_search(
-        query=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
+    docs_with_scores = _retrieve_docs(
+        question=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
     )
     if not docs_with_scores:
         return {

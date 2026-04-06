@@ -496,6 +496,79 @@ def _doc_overlap_score(query_tokens: List[str], doc: Document) -> float:
     return matched / float(len(query_tokens))
 
 
+def _rating_sort_direction(query: str) -> Optional[str]:
+    text = (query or "").lower()
+
+    # Numeric minimum phrases mean "rating >= N", not "sort lowest first".
+    numeric_min_rating = re.search(
+        r"(?:minimum|min)\s*(?:average\s*)?ratings?\s*(?:is|of|will be)?\s*\d(?:\.\d+)?",
+        text,
+    )
+    low_phrases = (
+        "low rating",
+        "low ratings",
+        "lower rating",
+        "lower ratings",
+        "lowest rating",
+        "lowest ratings",
+        "minimum rating",
+        "minimum ratings",
+        "min rating",
+        "min ratings",
+    )
+    if not numeric_min_rating and any(phrase in text for phrase in low_phrases):
+        return "asc"
+
+    high_phrases = (
+        "good rating",
+        "good ratings",
+        "better rating",
+        "better ratings",
+        "best rating",
+        "best ratings",
+        "highest rating",
+        "highest ratings",
+        "maximum rating",
+        "maximum ratings",
+        "top rated",
+        "well rated",
+    )
+    if any(phrase in text for phrase in high_phrases):
+        return "desc"
+
+    return None
+
+
+def rating_sort_direction(query: str) -> Optional[str]:
+    return _rating_sort_direction(query)
+
+
+def price_sort_direction(query: str, filter_obj: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    if filter_obj and filter_obj.get("price_sort") in ("asc", "desc"):
+        return filter_obj["price_sort"]
+
+    text = (query or "").lower()
+    if "maximum price" in text or "max price" in text or "highest price" in text:
+        return "desc"
+    if (
+        "minimum price" in text
+        or "min price" in text
+        or "lowest price" in text
+        or "cheapest" in text
+    ):
+        return "asc"
+    return None
+
+
+def _rating_value(doc: Document) -> float:
+    value = coerce_float((doc.metadata or {}).get("average_rating"))
+    return value if value is not None else -1.0
+
+
+def _price_value(doc: Document) -> Optional[float]:
+    return coerce_float((doc.metadata or {}).get("price"))
+
+
 def _matches_range_filter(value: Any, range_filter: Dict[str, Any]) -> bool:
     numeric_value = coerce_float(value)
     if numeric_value is None:
@@ -529,10 +602,132 @@ def _matches_filter_obj(doc: Document, filter_obj: Optional[Dict[str, Any]]) -> 
     return True
 
 
+def _metadata_row_to_doc(row: Dict[str, Any], fallback_id: str) -> Optional[Document]:
+    return Document(
+        page_content=str(row.get("chroma:document") or ""),
+        metadata={
+            "title": row.get("title"),
+            "parent_asin": row.get("parent_asin"),
+            "main_category": row.get("main_category"),
+            "store": row.get("store"),
+            "average_rating": coerce_float(row.get("average_rating")),
+            "rating_number": coerce_int(row.get("rating_number")),
+            "price": coerce_float(row.get("price")),
+            "date_first_available": row.get("date_first_available"),
+            "image": row.get("image"),
+        },
+        id=fallback_id,
+    )
+
+
+def _chroma_metadata_rows() -> List[Dict[str, Any]]:
+    sqlite_path = os.path.join(CHROMA_DIR, "chroma.sqlite3")
+    if not os.path.exists(sqlite_path):
+        return []
+
+    rows_by_id: Dict[str, Dict[str, Any]] = {}
+    con = sqlite3.connect(sqlite_path, timeout=1)
+    try:
+        rows = con.execute(
+            "select id, key, string_value, int_value, float_value, bool_value from embedding_metadata"
+        ).fetchall()
+    finally:
+        con.close()
+
+    for row_id, key, string_value, int_value, float_value, bool_value in rows:
+        value = string_value
+        if value is None:
+            value = float_value
+        if value is None:
+            value = int_value
+        if value is None:
+            value = bool_value
+        rows_by_id.setdefault(str(row_id), {})[key] = value
+
+    return [{"_id": row_id, **metadata} for row_id, metadata in rows_by_id.items()]
+
+
+def rating_sorted_search(
+    query: str,
+    k: int = 5,
+    filter_obj: Optional[Dict[str, Any]] = None,
+    direction: str = "asc",
+) -> List[Tuple[Document, float]]:
+    q_tokens = _query_tokens(query)
+    candidates: List[Tuple[Document, float, float]] = []
+
+    for row in _chroma_metadata_rows():
+        doc = _metadata_row_to_doc(row, fallback_id=str(row.get("_id")))
+        if doc is None or not _matches_filter_obj(doc, filter_obj):
+            continue
+        overlap = _doc_overlap_score(q_tokens, doc)
+        if overlap <= 0:
+            continue
+        rating = coerce_float((doc.metadata or {}).get("average_rating"))
+        if rating is None:
+            continue
+        candidates.append((doc, overlap, rating))
+
+    reverse_rating = direction == "desc"
+    candidates.sort(
+        key=lambda item: (
+            item[2] if not reverse_rating else -item[2],
+            -item[1],
+        )
+    )
+    return [(doc, 0.0) for doc, _, _ in candidates[:k]]
+
+
+def metadata_sorted_search(
+    query: str,
+    k: int = 5,
+    filter_obj: Optional[Dict[str, Any]] = None,
+) -> List[Tuple[Document, float]]:
+    q_tokens = _query_tokens(query)
+    rating_direction = (filter_obj or {}).get("rating_sort") or _rating_sort_direction(query)
+    price_direction = price_sort_direction(query, filter_obj)
+    candidates: List[Tuple[Document, float, Optional[float], Optional[float]]] = []
+
+    for row in _chroma_metadata_rows():
+        doc = _metadata_row_to_doc(row, fallback_id=str(row.get("_id")))
+        if doc is None or not _matches_filter_obj(doc, filter_obj):
+            continue
+        overlap = _doc_overlap_score(q_tokens, doc)
+        if overlap <= 0:
+            continue
+        rating = coerce_float((doc.metadata or {}).get("average_rating"))
+        price = _price_value(doc)
+        if rating_direction and rating is None:
+            continue
+        if price_direction and price is None:
+            continue
+        candidates.append((doc, overlap, rating, price))
+
+    def sort_key(item: Tuple[Document, float, Optional[float], Optional[float]]):
+        _, overlap, rating, price = item
+        rating_value = rating if rating is not None else -1.0
+        price_value = price if price is not None else -1.0
+        keys = []
+        if price_direction == "desc":
+            keys.append(-price_value)
+        elif price_direction == "asc":
+            keys.append(price_value)
+        if rating_direction == "desc":
+            keys.append(-rating_value)
+        elif rating_direction == "asc":
+            keys.append(rating_value)
+        keys.append(-overlap)
+        return tuple(keys)
+
+    candidates.sort(key=sort_key)
+    return [(doc, 0.0) for doc, _, _, _ in candidates[:k]]
+
+
 def _rerank_by_lexical_overlap(
     query: str, docs_with_scores: List[Tuple[Document, float]], k: int
 ) -> List[Tuple[Document, float]]:
     q_tokens = _query_tokens(query)
+    rating_sort_direction = _rating_sort_direction(query)
     if not docs_with_scores:
         return docs_with_scores
 
@@ -552,6 +747,11 @@ def _rerank_by_lexical_overlap(
         positive,
         key=lambda item: (
             -item[2],
+            _rating_value(item[1][0])
+            if rating_sort_direction == "asc"
+            else -_rating_value(item[1][0])
+            if rating_sort_direction == "desc"
+            else 0,
             item[0],  # preserve vector order as tie-breaker
         ),
     )

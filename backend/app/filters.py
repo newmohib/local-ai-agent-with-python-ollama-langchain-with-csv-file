@@ -182,6 +182,48 @@ def infer_filter_from_query(query: str) -> Dict[str, Any]:
     if price_min is not None:
         price["min"] = price_min
 
+    require_real_price = (
+        ("price" in text)
+        and (
+            "not be empty" in text
+            or "do not be empty" in text
+            or "do not will be empty" in text
+            or "not empty" in text
+            or "not null" in text
+            or "non null" in text
+            or "no null" in text
+            or "not zero" in text
+            or "non zero" in text
+            or "no zero" in text
+            or "empty, zero, null" in text
+            or "empty zero null" in text
+        )
+    )
+    if require_real_price:
+        price["min"] = max(price.get("min", 0.0), 0.01)
+
+    price_sort_desc = (
+        (
+            "maximum price" in text
+            or "max price" in text
+            or "highest price" in text
+        )
+        and price_max is None
+    )
+    price_sort_asc = (
+        (
+            "minimum price" in text
+            or "min price" in text
+            or "lowest price" in text
+            or "cheapest" in text
+        )
+        and price_min is None
+    )
+    if price_sort_desc:
+        inferred["price_sort"] = "desc"
+    elif price_sort_asc:
+        inferred["price_sort"] = "asc"
+
     if price:
         inferred["price"] = price
 
@@ -208,11 +250,55 @@ def infer_filter_from_query(query: str) -> Dict[str, Any]:
     if rating_max is not None:
         rating["max"] = min(rating_max, 5.0)
 
-    if "good rating" in text or "good ratings" in text or "high rating" in text:
+    if (
+        "better rating" in text
+        or "better ratings" in text
+        or "best rating" in text
+        or "best ratings" in text
+        or "highest rating" in text
+        or "highest ratings" in text
+        or "maximum rating" in text
+        or "maximum ratings" in text
+        or "top rated" in text
+    ):
+        rating.setdefault("min", 4.5)
+    elif (
+        "good rating" in text
+        or "good ratings" in text
+        or "high rating" in text
+        or "high ratings" in text
+        or "well rated" in text
+    ):
         rating.setdefault("min", 4.0)
 
     if rating:
         inferred["average_rating"] = rating
+
+    low_rating_requested = (
+        "low rating" in text
+        or "low ratings" in text
+        or "lower rating" in text
+        or "lower ratings" in text
+        or "lowest rating" in text
+        or "lowest ratings" in text
+    )
+    if low_rating_requested:
+        inferred["rating_sort"] = "asc"
+
+    max_rating_requested = (
+        "maximum rating" in text
+        or "maximum ratings" in text
+        or "max rating" in text
+        or "max ratings" in text
+        or "highest rating" in text
+        or "highest ratings" in text
+        or "best rating" in text
+        or "best ratings" in text
+        or bool(re.search(r"maximum\s+price\s+(?:and|&)\s+ratings?", text))
+    )
+    if max_rating_requested:
+        inferred["rating_sort"] = "desc"
+        inferred.setdefault("average_rating", {}).setdefault("min", 4.5)
 
     rating_count: Dict[str, int] = {}
     rating_count_min = _first_float(

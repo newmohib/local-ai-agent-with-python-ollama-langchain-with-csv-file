@@ -121,7 +121,10 @@ curl -X POST http://localhost:9000/search \
   -H "Content-Type: application/json" \
   -d '{"query": "wireless earbuds under $50 with good ratings", "k": 5}'
 ```
-
+- wireless earbuds under $50 with maximum ratings
+- wireless earbuds under $50 with average ratings
+- wireless earbuds with minimum rating and maximum pricing but price do not will be empty, zero, null
+- wireless earbuds with maximum rating and pricing but price do not will be empty, zero, null
 ## Streaming chat
 
 ```bash

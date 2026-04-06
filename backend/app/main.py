@@ -8,7 +8,12 @@ from pydantic import BaseModel, Field
 from .vector_store import ensure_index, export_hf_to_csv, stream_index
 from .rag import stream_answer, answer_json
 from .filters import build_vector_filter, infer_filter_from_query, merge_filter_objects
-from .vector_store import similarity_search, get_index_stats
+from .vector_store import (
+    similarity_search,
+    get_index_stats,
+    rating_sort_direction,
+    metadata_sorted_search,
+)
 from .config import VECTOR_DB
 
 
@@ -167,12 +172,20 @@ def recommendations(req: ChatRequest):
     )
     vector_filter = build_vector_filter(VECTOR_DB, merged_filter)
     started = perf_counter()
-    results = similarity_search(
-        req.question,
-        k=req.k,
-        metadata_filter=vector_filter,
-        filter_obj=merged_filter,
-    )
+    sort_direction = rating_sort_direction(req.question)
+    if sort_direction or (merged_filter or {}).get("price_sort"):
+        results = metadata_sorted_search(
+            req.question,
+            k=req.k,
+            filter_obj=merged_filter,
+        )
+    else:
+        results = similarity_search(
+            req.question,
+            k=req.k,
+            metadata_filter=vector_filter,
+            filter_obj=merged_filter,
+        )
     retrieval_ms = round((perf_counter() - started) * 1000, 2)
 
     recommendations_out: List[Dict[str, Any]] = []
@@ -220,12 +233,20 @@ def search(req: SearchRequest):
     )
     vector_filter = build_vector_filter(VECTOR_DB, merged_filter)
     started = perf_counter()
-    results = similarity_search(
-        req.query,
-        k=req.k,
-        metadata_filter=vector_filter,
-        filter_obj=merged_filter,
-    )
+    sort_direction = rating_sort_direction(req.query)
+    if sort_direction or (merged_filter or {}).get("price_sort"):
+        results = metadata_sorted_search(
+            req.query,
+            k=req.k,
+            filter_obj=merged_filter,
+        )
+    else:
+        results = similarity_search(
+            req.query,
+            k=req.k,
+            metadata_filter=vector_filter,
+            filter_obj=merged_filter,
+        )
     retrieval_ms = round((perf_counter() - started) * 1000, 2)
 
     out: List[Dict[str, Any]] = []
