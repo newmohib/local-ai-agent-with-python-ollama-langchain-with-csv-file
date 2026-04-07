@@ -1,4 +1,5 @@
 from functools import lru_cache
+import json
 from typing import Dict, Any, List, Optional, Generator, Tuple
 
 from langchain_ollama import OllamaLLM
@@ -103,6 +104,71 @@ def stream_answer(
     for chunk in chain.stream({"context": context, "question": question}):
         # chunk is usually str
         yield chunk
+
+
+def stream_recommendations(
+    question: str,
+    k: int = 5,
+    metadata_filter: Optional[Dict[str, Any]] = None,
+    filter_obj: Optional[Dict[str, Any]] = None,
+    sse: bool = False,
+) -> Generator[str, None, None]:
+    def _emit(payload: Dict[str, Any]) -> str:
+        line = json.dumps(payload)
+        if sse:
+            return f"data: {line}\n\n"
+        return line + "\n"
+
+    # Emit immediately so clients see the stream start before retrieval completes.
+    yield _emit({"event": "start", "question": question})
+
+    docs_with_scores = _retrieve_docs(
+        question=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
+    )
+    if not docs_with_scores:
+        yield _emit(
+            {
+                "event": "complete",
+                "question": question,
+                "recommendations": [],
+                "citations": [],
+            }
+        )
+        return
+
+    yield _emit({"event": "ready", "count": len(docs_with_scores)})
+
+    for d, score in docs_with_scores:
+        md = d.metadata or {}
+        yield _emit(
+            {
+                "event": "item",
+                "recommendation": {
+                    "parent_asin": md.get("parent_asin"),
+                    "title": md.get("title"),
+                    "main_category": md.get("main_category"),
+                    "store": md.get("store"),
+                    "price": md.get("price"),
+                    "average_rating": md.get("average_rating"),
+                    "rating_number": md.get("rating_number"),
+                    "date_first_available": md.get("date_first_available"),
+                    "image": md.get("image"),
+                    "score": score,
+                },
+                "citation": {
+                    "parent_asin": md.get("parent_asin"),
+                    "score": score,
+                    "snippet": (d.page_content or "")[:220],
+                },
+            }
+        )
+
+    yield _emit(
+        {
+            "event": "complete",
+            "question": question,
+        }
+    )
 
 
 def answer_json(

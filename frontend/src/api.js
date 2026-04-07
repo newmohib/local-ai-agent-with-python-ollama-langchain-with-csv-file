@@ -61,6 +61,48 @@ export async function streamChat({ question, k = 5, filter = null }, onChunk) {
   }
 }
 
+export async function streamRecommendations(
+  { question, k = 5, filter = null },
+  onEvent
+) {
+  const res = await fetch(`${API_BASE}/recommendations/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, k, filter }),
+  });
+  if (!res.ok) throw new Error("Recommendation stream failed");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        onEvent(JSON.parse(trimmed));
+      } catch {
+        // ignore invalid partial lines
+      }
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    try {
+      onEvent(JSON.parse(tail));
+    } catch {
+      // ignore final partial line
+    }
+  }
+}
+
 export async function chatJson({ question, k = 5, filter = null }) {
   const res = await fetch(`${API_BASE}/recommendations`, {
     method: "POST",

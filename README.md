@@ -1,3 +1,4 @@
+<!-- codex resume  -->
 # Amazon Products RAG Search
 
 Local RAG product-search app using:
@@ -221,6 +222,14 @@ curl -N -X POST http://localhost:9000/chat/stream \
   -d '{"question": "wireless earbuds under $50 with good ratings", "k": 5}'
 ```
 
+Fast streaming recommendations without LLM:
+
+```bash
+curl -N -X POST http://localhost:9000/recommendations/stream \
+  -H "Content-Type: application/json" \
+  -d '{"question": "wireless earbuds under $50 with good ratings", "k": 5}'
+```
+
 ## Query Examples
 
 Natural language filters are inferred by backend:
@@ -312,6 +321,7 @@ Frontend supports:
 - `POST /index/stream`
 - `POST /search`
 - `POST /recommendations`
+- `POST /recommendations/stream`
 - `POST /chat`
 - `POST /chat/stream`
 

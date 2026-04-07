@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .vector_store import ensure_index, export_hf_to_csv, stream_index
-from .rag import stream_answer, answer_json
+from .rag import stream_answer, answer_json, stream_recommendations
 from .filters import build_vector_filter, infer_filter_from_query, merge_filter_objects
 from .vector_store import (
     similarity_search,
@@ -74,6 +74,7 @@ class ChatRequest(BaseModel):
     question: str
     k: int = 5
     filter: Optional[FilterModel] = None
+    fast: bool = False
 
 
 class SearchRequest(BaseModel):
@@ -136,14 +137,29 @@ def chat_stream(req: ChatRequest):
         infer_filter_from_query(req.question),
     )
     vector_filter = build_vector_filter(VECTOR_DB, merged_filter)
+    if req.fast:
+        gen = stream_recommendations(
+            question=req.question,
+            k=req.k,
+            metadata_filter=vector_filter,
+            filter_obj=merged_filter,
+            sse=True,
+        )
+        return StreamingResponse(
+            gen,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     gen = stream_answer(
         question=req.question,
         k=req.k,
         metadata_filter=vector_filter,
         filter_obj=merged_filter,
     )
-
-    # Plain text streaming
     return StreamingResponse(gen, media_type="text/plain")
 
 
@@ -222,6 +238,23 @@ def recommendations(req: ChatRequest):
         "applied_filter": merged_filter,
         "timing_ms": {"retrieval": retrieval_ms},
     }
+
+
+@app.post("/recommendations/stream")
+def recommendations_stream(req: ChatRequest):
+    explicit_filter = req.filter.dict(by_alias=True) if req.filter else None
+    merged_filter = merge_filter_objects(
+        explicit_filter,
+        infer_filter_from_query(req.question),
+    )
+    vector_filter = build_vector_filter(VECTOR_DB, merged_filter)
+    gen = stream_recommendations(
+        question=req.question,
+        k=req.k,
+        metadata_filter=vector_filter,
+        filter_obj=merged_filter,
+    )
+    return StreamingResponse(gen, media_type="application/x-ndjson")
 
 
 @app.post("/search")

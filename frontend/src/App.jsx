@@ -3,6 +3,7 @@ import {
   exportDataset,
   indexDataset,
   streamChat,
+  streamRecommendations,
   chatJson,
   searchProducts,
   getStatus,
@@ -147,6 +148,39 @@ export default function App() {
     }
   }
 
+  async function handleAskFastStream() {
+    setLoading(true);
+    setAnswer("");
+    setSearchResults("");
+    setJsonAnswer({ recommendations: [] });
+    setJsonSearch(null);
+    setActiveMode("fast-stream");
+
+    const finalFilter = buildFilter();
+
+    try {
+      await streamRecommendations(
+        { question, k: Number(k), filter: finalFilter },
+        (evt) => {
+          setAnswer((prev) => prev + `${JSON.stringify(evt)}\n`);
+          if (evt.event === "item" && evt.recommendation) {
+            setJsonAnswer((prev) => ({
+              ...prev,
+              recommendations: [
+                ...(prev?.recommendations || []),
+                evt.recommendation,
+              ],
+            }));
+          }
+        }
+      );
+    } catch (e) {
+      setAnswer(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleAskJson() {
     setLoading(true);
     setAnswer("");
@@ -226,6 +260,7 @@ export default function App() {
           </button>
           <div className="chip">
             {activeMode === "stream" && "Mode: Stream"}
+            {activeMode === "fast-stream" && "Mode: Fast Stream"}
             {activeMode === "json" && "Mode: JSON"}
             {activeMode === "search" && "Mode: Search"}
           </div>
@@ -294,6 +329,13 @@ export default function App() {
               disabled={loading || !question.trim()}
             >
               {loading ? "Thinking..." : "Ask (Stream)"}
+            </button>
+            <button
+              className="primary"
+              onClick={handleAskFastStream}
+              disabled={loading || !question.trim()}
+            >
+              {loading ? "Streaming..." : "Fast Stream"}
             </button>
             <button
               className="primary"
