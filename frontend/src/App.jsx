@@ -35,6 +35,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [expandedRows, setExpandedRows] = useState(() => new Set());
   const [appTableCollapsed, setAppTableCollapsed] = useState(false);
+  const [resultsCollapsed, setResultsCollapsed] = useState(false);
   const [expandedAnswerCards, setExpandedAnswerCards] = useState(() => new Set());
   const [expandedSearchCards, setExpandedSearchCards] = useState(() => new Set());
   const [productForm, setProductForm] = useState({
@@ -583,6 +584,12 @@ export default function App() {
           <div className="result-head">
             <span>Answer</span>
             <button
+              className="ghost"
+              onClick={() => setResultsCollapsed((prev) => !prev)}
+            >
+              {resultsCollapsed ? "Expand Results ▸" : "Collapse Results ▾"}
+            </button>
+            <button
               className="mini"
               onClick={() => {
                 if (answer) navigator.clipboard.writeText(answer);
@@ -593,57 +600,61 @@ export default function App() {
               Copy JSON
             </button>
           </div>
-          {lastFilter && (
-            <div className="filter-summary">
-              Filter: {JSON.stringify(lastFilter)}
-            </div>
-          )}
-          <pre className="result-body">
-            {answer || "Answer will stream here..."}
-          </pre>
-          {jsonAnswer?.recommendations?.length ? (
-            <div className="cards">
-              {jsonAnswer.recommendations.map((r, idx) => {
-                const cardKey = String(r.parent_asin || idx);
-                return (
-                <div className="card" key={cardKey}>
-                  <div className="card-title">{r.title || "Untitled"}</div>
-                  <div className="card-meta">
-                    {r.main_category && <span>{r.main_category}</span>}
-                    {r.price !== null && r.price !== undefined && (
-                      <span>${r.price}</span>
-                    )}
-                    {r.average_rating !== null && r.average_rating !== undefined && (
-                      <span>⭐ {r.average_rating}</span>
-                    )}
-                  </div>
-                  <div className="card-meta">
-                    {r.rating_number !== null && r.rating_number !== undefined && (
-                      <span>{r.rating_number} ratings</span>
-                    )}
-                    {r.parent_asin && <span>{r.parent_asin}</span>}
-                  </div>
-                  <div className="card-actions">
-                    <button
-                      className="ghost"
-                      onClick={() => toggleAnswerCard(cardKey)}
-                    >
-                      {expandedAnswerCards.has(cardKey)
-                        ? "Hide Details"
-                        : "Details"}
-                    </button>
-                  </div>
-                  {expandedAnswerCards.has(cardKey) && (
-                    <div className="card-detail">
-                      <div>Store: {r.store ?? "-"}</div>
-                      <div>Date: {r.date_first_available ?? "-"}</div>
-                      <div>Image: {r.image ? "Yes" : "No"}</div>
-                    </div>
-                  )}
+          {!resultsCollapsed && (
+            <>
+              {lastFilter && (
+                <div className="filter-summary">
+                  Filter: {JSON.stringify(lastFilter)}
                 </div>
-              )})}
-            </div>
-          ) : null}
+              )}
+              <pre className="result-body">
+                {answer || "Answer will stream here..."}
+              </pre>
+              {jsonAnswer?.recommendations?.length ? (
+                <div className="cards">
+                  {jsonAnswer.recommendations.map((r, idx) => {
+                    const cardKey = String(r.parent_asin || idx);
+                    return (
+                    <div className="card" key={cardKey}>
+                      <div className="card-title">{r.title || "Untitled"}</div>
+                      <div className="card-meta">
+                        {r.main_category && <span>{r.main_category}</span>}
+                        {r.price !== null && r.price !== undefined && (
+                          <span>${r.price}</span>
+                        )}
+                        {r.average_rating !== null && r.average_rating !== undefined && (
+                          <span>⭐ {r.average_rating}</span>
+                        )}
+                      </div>
+                      <div className="card-meta">
+                        {r.rating_number !== null && r.rating_number !== undefined && (
+                          <span>{r.rating_number} ratings</span>
+                        )}
+                        {r.parent_asin && <span>{r.parent_asin}</span>}
+                      </div>
+                      <div className="card-actions">
+                        <button
+                          className="ghost"
+                          onClick={() => toggleAnswerCard(cardKey)}
+                        >
+                          {expandedAnswerCards.has(cardKey)
+                            ? "Hide Details"
+                            : "Details"}
+                        </button>
+                      </div>
+                      {expandedAnswerCards.has(cardKey) && (
+                        <div className="card-detail">
+                          <div>Store: {r.store ?? "-"}</div>
+                          <div>Date: {r.date_first_available ?? "-"}</div>
+                          <div>Image: {r.image ? "Yes" : "No"}</div>
+                        </div>
+                      )}
+                    </div>
+                  )})}
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
         <div className="result-card alt">
           <div className="result-head">
@@ -659,53 +670,57 @@ export default function App() {
               Copy JSON
             </button>
           </div>
-          <pre className="result-body">
-            {searchResults || "Search results will appear here..."}
-          </pre>
-          {jsonSearch?.results?.length ? (
-            <div className="cards">
-              {jsonSearch.results.map((r, idx) => {
-                const cardKey = String(r.parent_asin || idx);
-                return (
-                <div className="card" key={cardKey}>
-                  <div className="card-title">{r.title || "Untitled"}</div>
-                  <div className="card-meta">
-                    {r.main_category && <span>{r.main_category}</span>}
-                    {r.price !== null && r.price !== undefined && (
-                      <span>${r.price}</span>
-                    )}
-                    {r.average_rating !== null && r.average_rating !== undefined && (
-                      <span>⭐ {r.average_rating}</span>
-                    )}
-                  </div>
-                  <div className="card-meta">
-                    {r.score !== null && r.score !== undefined && (
-                      <span>Score: {r.score.toFixed(4)}</span>
-                    )}
-                    {r.parent_asin && <span>{r.parent_asin}</span>}
-                  </div>
-                  <div className="card-actions">
-                    <button
-                      className="ghost"
-                      onClick={() => toggleSearchCard(cardKey)}
-                    >
-                      {expandedSearchCards.has(cardKey)
-                        ? "Hide Details"
-                        : "Details"}
-                    </button>
-                  </div>
-                  {expandedSearchCards.has(cardKey) && (
-                    <div className="card-detail">
-                      <div>Store: {r.store ?? "-"}</div>
-                      <div>Date: {r.date_first_available ?? "-"}</div>
-                      <div>Image: {r.image ? "Yes" : "No"}</div>
-                      <div>Snippet: {r.snippet ?? "-"}</div>
+          {!resultsCollapsed && (
+            <>
+              <pre className="result-body">
+                {searchResults || "Search results will appear here..."}
+              </pre>
+              {jsonSearch?.results?.length ? (
+                <div className="cards">
+                  {jsonSearch.results.map((r, idx) => {
+                    const cardKey = String(r.parent_asin || idx);
+                    return (
+                    <div className="card" key={cardKey}>
+                      <div className="card-title">{r.title || "Untitled"}</div>
+                      <div className="card-meta">
+                        {r.main_category && <span>{r.main_category}</span>}
+                        {r.price !== null && r.price !== undefined && (
+                          <span>${r.price}</span>
+                        )}
+                        {r.average_rating !== null && r.average_rating !== undefined && (
+                          <span>⭐ {r.average_rating}</span>
+                        )}
+                      </div>
+                      <div className="card-meta">
+                        {r.score !== null && r.score !== undefined && (
+                          <span>Score: {r.score.toFixed(4)}</span>
+                        )}
+                        {r.parent_asin && <span>{r.parent_asin}</span>}
+                      </div>
+                      <div className="card-actions">
+                        <button
+                          className="ghost"
+                          onClick={() => toggleSearchCard(cardKey)}
+                        >
+                          {expandedSearchCards.has(cardKey)
+                            ? "Hide Details"
+                            : "Details"}
+                        </button>
+                      </div>
+                      {expandedSearchCards.has(cardKey) && (
+                        <div className="card-detail">
+                          <div>Store: {r.store ?? "-"}</div>
+                          <div>Date: {r.date_first_available ?? "-"}</div>
+                          <div>Image: {r.image ? "Yes" : "No"}</div>
+                          <div>Snippet: {r.snippet ?? "-"}</div>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  )})}
                 </div>
-              )})}
-            </div>
-          ) : null}
+              ) : null}
+            </>
+          )}
         </div>
       </section>
 
@@ -780,10 +795,12 @@ export default function App() {
             Add / Update
           </button>
           <button className="ghost" onClick={handleImportToAppDb} disabled={importing}>
-            {importing ? <span className="spinner" /> : "Import CSV (Skip Existing)"}
+            Import CSV (Skip Existing)
+            {importing && <span className="spinner" />}
           </button>
           <button className="ghost" onClick={handleSyncEmbeddings} disabled={syncing}>
-            {syncing ? <span className="spinner" /> : "Sync Embeddings"}
+            Sync Embeddings
+            {syncing && <span className="spinner" />}
           </button>
           {productError && <span className="hint">{productError}</span>}
         </div>
