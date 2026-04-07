@@ -11,6 +11,7 @@ import {
   createProduct,
   updateProduct,
   deleteProduct,
+  syncProductEmbedding,
   importProducts,
 } from "./api";
 import "./App.css";
@@ -38,6 +39,13 @@ export default function App() {
   const [resultsCollapsed, setResultsCollapsed] = useState(false);
   const [expandedAnswerCards, setExpandedAnswerCards] = useState(() => new Set());
   const [expandedSearchCards, setExpandedSearchCards] = useState(() => new Set());
+  const [rowSyncing, setRowSyncing] = useState({});
+  const [appSearch, setAppSearch] = useState({
+    parent_asin: "",
+    title: "",
+    store: "",
+    main_category: "",
+  });
   const [productForm, setProductForm] = useState({
     parent_asin: "",
     title: "",
@@ -118,10 +126,17 @@ export default function App() {
     }
   }
 
-  async function refreshProducts() {
+  async function refreshProducts(params = {}) {
     try {
       setProductError("");
-      const out = await listProducts({ limit: 50, offset: 0 });
+      const out = await listProducts({
+        limit: 50,
+        offset: 0,
+        parentAsin: params.parent_asin || appSearch.parent_asin,
+        title: params.title || appSearch.title,
+        store: params.store || appSearch.store,
+        mainCategory: params.main_category || appSearch.main_category,
+      });
       setProducts(out.products || []);
     } catch (e) {
       setProductError(String(e));
@@ -216,6 +231,19 @@ export default function App() {
     }
   }
 
+  async function handleSyncProduct(parentAsin) {
+    try {
+      setProductError("");
+      setRowSyncing((prev) => ({ ...prev, [parentAsin]: true }));
+      await syncProductEmbedding(parentAsin);
+      await refreshStatus();
+    } catch (e) {
+      setProductError(String(e));
+    } finally {
+      setRowSyncing((prev) => ({ ...prev, [parentAsin]: false }));
+    }
+  }
+
   async function handleDeleteProduct(parentAsin) {
     try {
       setProductError("");
@@ -225,6 +253,20 @@ export default function App() {
     } catch (e) {
       setProductError(String(e));
     }
+  }
+
+  async function handleAppSearch() {
+    await refreshProducts();
+  }
+
+  async function handleAppSearchClear() {
+    setAppSearch({ parent_asin: "", title: "", store: "", main_category: "" });
+    await refreshProducts({
+      parent_asin: "",
+      title: "",
+      store: "",
+      main_category: "",
+    });
   }
 
   function toggleRow(parentAsin) {
@@ -579,152 +621,162 @@ export default function App() {
         </div>
       </section>
 
-      <section className="results">
-        <div className="result-card">
-          <div className="result-head">
-            <span>Answer</span>
-            <button
-              className="ghost"
-              onClick={() => setResultsCollapsed((prev) => !prev)}
-            >
-              {resultsCollapsed ? "Expand Results ▸" : "Collapse Results ▾"}
-            </button>
-            <button
-              className="mini"
-              onClick={() => {
-                if (answer) navigator.clipboard.writeText(answer);
-              }}
-              disabled={!answer}
-              title="Copy answer JSON/text"
-            >
-              Copy JSON
-            </button>
-          </div>
-          {!resultsCollapsed && (
-            <>
-              {lastFilter && (
-                <div className="filter-summary">
-                  Filter: {JSON.stringify(lastFilter)}
-                </div>
-              )}
-              <pre className="result-body">
-                {answer || "Answer will stream here..."}
-              </pre>
-              {jsonAnswer?.recommendations?.length ? (
-                <div className="cards">
-                  {jsonAnswer.recommendations.map((r, idx) => {
-                    const cardKey = String(r.parent_asin || idx);
-                    return (
-                    <div className="card" key={cardKey}>
-                      <div className="card-title">{r.title || "Untitled"}</div>
-                      <div className="card-meta">
-                        {r.main_category && <span>{r.main_category}</span>}
-                        {r.price !== null && r.price !== undefined && (
-                          <span>${r.price}</span>
-                        )}
-                        {r.average_rating !== null && r.average_rating !== undefined && (
-                          <span>⭐ {r.average_rating}</span>
-                        )}
-                      </div>
-                      <div className="card-meta">
-                        {r.rating_number !== null && r.rating_number !== undefined && (
-                          <span>{r.rating_number} ratings</span>
-                        )}
-                        {r.parent_asin && <span>{r.parent_asin}</span>}
-                      </div>
-                      <div className="card-actions">
-                        <button
-                          className="ghost"
-                          onClick={() => toggleAnswerCard(cardKey)}
-                        >
-                          {expandedAnswerCards.has(cardKey)
-                            ? "Hide Details"
-                            : "Details"}
-                        </button>
-                      </div>
-                      {expandedAnswerCards.has(cardKey) && (
-                        <div className="card-detail">
-                          <div>Store: {r.store ?? "-"}</div>
-                          <div>Date: {r.date_first_available ?? "-"}</div>
-                          <div>Image: {r.image ? "Yes" : "No"}</div>
-                        </div>
-                      )}
-                    </div>
-                  )})}
-                </div>
-              ) : null}
-            </>
-          )}
+      <section className="results-section">
+        <div className="results-head">
+          <div className="results-title">Results</div>
+          <button
+            className="ghost"
+            onClick={() => setResultsCollapsed((prev) => !prev)}
+          >
+            {resultsCollapsed ? "Expand Results ▸" : "Collapse Results ▾"}
+          </button>
         </div>
-        <div className="result-card alt">
-          <div className="result-head">
-            <span>Search Results</span>
-            <button
-              className="mini"
-              onClick={() => {
-                if (searchResults) navigator.clipboard.writeText(searchResults);
-              }}
-              disabled={!searchResults}
-              title="Copy search JSON/text"
-            >
-              Copy JSON
-            </button>
-          </div>
-          {!resultsCollapsed && (
-            <>
-              <pre className="result-body">
-                {searchResults || "Search results will appear here..."}
-              </pre>
-              {jsonSearch?.results?.length ? (
-                <div className="cards">
-                  {jsonSearch.results.map((r, idx) => {
-                    const cardKey = String(r.parent_asin || idx);
-                    return (
-                    <div className="card" key={cardKey}>
-                      <div className="card-title">{r.title || "Untitled"}</div>
-                      <div className="card-meta">
-                        {r.main_category && <span>{r.main_category}</span>}
-                        {r.price !== null && r.price !== undefined && (
-                          <span>${r.price}</span>
-                        )}
-                        {r.average_rating !== null && r.average_rating !== undefined && (
-                          <span>⭐ {r.average_rating}</span>
-                        )}
-                      </div>
-                      <div className="card-meta">
-                        {r.score !== null && r.score !== undefined && (
-                          <span>Score: {r.score.toFixed(4)}</span>
-                        )}
-                        {r.parent_asin && <span>{r.parent_asin}</span>}
-                      </div>
-                      <div className="card-actions">
-                        <button
-                          className="ghost"
-                          onClick={() => toggleSearchCard(cardKey)}
-                        >
-                          {expandedSearchCards.has(cardKey)
-                            ? "Hide Details"
-                            : "Details"}
-                        </button>
-                      </div>
-                      {expandedSearchCards.has(cardKey) && (
-                        <div className="card-detail">
-                          <div>Store: {r.store ?? "-"}</div>
-                          <div>Date: {r.date_first_available ?? "-"}</div>
-                          <div>Image: {r.image ? "Yes" : "No"}</div>
-                          <div>Snippet: {r.snippet ?? "-"}</div>
+        <div className="results">
+          <div className="result-card">
+            <div className="result-head">
+              <span>Answer</span>
+              <button
+                className="mini"
+                onClick={() => {
+                  if (answer) navigator.clipboard.writeText(answer);
+                }}
+                disabled={!answer}
+                title="Copy answer JSON/text"
+              >
+                Copy JSON
+              </button>
+            </div>
+            {!resultsCollapsed && (
+              <>
+                {lastFilter && (
+                  <div className="filter-summary">
+                    Filter: {JSON.stringify(lastFilter)}
+                  </div>
+                )}
+                <pre className="result-body">
+                  {answer || "Answer will stream here..."}
+                </pre>
+                {jsonAnswer?.recommendations?.length ? (
+                  <div className="cards">
+                    {jsonAnswer.recommendations.map((r, idx) => {
+                      const cardKey = String(r.parent_asin || idx);
+                      return (
+                        <div className="card" key={cardKey}>
+                          <div className="card-title">{r.title || "Untitled"}</div>
+                          <div className="card-meta">
+                            {r.main_category && <span>{r.main_category}</span>}
+                            {r.price !== null && r.price !== undefined && (
+                              <span>${r.price}</span>
+                            )}
+                            {r.average_rating !== null &&
+                              r.average_rating !== undefined && (
+                                <span>⭐ {r.average_rating}</span>
+                              )}
+                          </div>
+                          <div className="card-meta">
+                            {r.rating_number !== null &&
+                              r.rating_number !== undefined && (
+                                <span>{r.rating_number} ratings</span>
+                              )}
+                            {r.parent_asin && <span>{r.parent_asin}</span>}
+                          </div>
+                          <div className="card-actions">
+                            <button
+                              className="ghost"
+                              onClick={() => toggleAnswerCard(cardKey)}
+                            >
+                              {expandedAnswerCards.has(cardKey)
+                                ? "Hide Details"
+                                : "Details"}
+                            </button>
+                          </div>
+                          {expandedAnswerCards.has(cardKey) && (
+                            <div className="card-detail">
+                              <div>Store: {r.store ?? "-"}</div>
+                              <div>Date: {r.date_first_available ?? "-"}</div>
+                              <div>Image: {r.image ? "Yes" : "No"}</div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  )})}
-                </div>
-              ) : null}
-            </>
-          )}
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+          <div className="result-card alt">
+            <div className="result-head">
+              <span>Search Results</span>
+              <button
+                className="mini"
+                onClick={() => {
+                  if (searchResults) navigator.clipboard.writeText(searchResults);
+                }}
+                disabled={!searchResults}
+                title="Copy search JSON/text"
+              >
+                Copy JSON
+              </button>
+            </div>
+            {!resultsCollapsed && (
+              <>
+                <pre className="result-body">
+                  {searchResults || "Search results will appear here..."}
+                </pre>
+                {jsonSearch?.results?.length ? (
+                  <div className="cards">
+                    {jsonSearch.results.map((r, idx) => {
+                      const cardKey = String(r.parent_asin || idx);
+                      return (
+                        <div className="card" key={cardKey}>
+                          <div className="card-title">{r.title || "Untitled"}</div>
+                          <div className="card-meta">
+                            {r.main_category && <span>{r.main_category}</span>}
+                            {r.price !== null && r.price !== undefined && (
+                              <span>${r.price}</span>
+                            )}
+                            {r.average_rating !== null &&
+                              r.average_rating !== undefined && (
+                                <span>⭐ {r.average_rating}</span>
+                              )}
+                          </div>
+                          <div className="card-meta">
+                            {r.score !== null && r.score !== undefined && (
+                              <span>Score: {r.score.toFixed(4)}</span>
+                            )}
+                            {r.parent_asin && <span>{r.parent_asin}</span>}
+                          </div>
+                          <div className="card-actions">
+                            <button
+                              className="ghost"
+                              onClick={() => toggleSearchCard(cardKey)}
+                            >
+                              {expandedSearchCards.has(cardKey)
+                                ? "Hide Details"
+                                : "Details"}
+                            </button>
+                          </div>
+                          {expandedSearchCards.has(cardKey) && (
+                            <div className="card-detail">
+                              <div>Store: {r.store ?? "-"}</div>
+                              <div>Date: {r.date_first_available ?? "-"}</div>
+                              <div>Image: {r.image ? "Yes" : "No"}</div>
+                              <div>Snippet: {r.snippet ?? "-"}</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
         </div>
       </section>
 
-      <section className="panel">
+<section className="panel">
         <div className="panel-head">
           <h2>App DB</h2>
           <div className="actions">
@@ -738,6 +790,40 @@ export default function App() {
         </div>
         <div className="hint">
           Manage SQLite records. Insert/update/delete auto-sync embeddings.
+        </div>
+        <div className="grid space-top">
+          <input
+            value={appSearch.parent_asin}
+            onChange={(e) =>
+              setAppSearch((s) => ({ ...s, parent_asin: e.target.value }))
+            }
+            placeholder="Search parent_asin"
+          />
+          <input
+            value={appSearch.title}
+            onChange={(e) => setAppSearch((s) => ({ ...s, title: e.target.value }))}
+            placeholder="Search title"
+          />
+          <input
+            value={appSearch.store}
+            onChange={(e) => setAppSearch((s) => ({ ...s, store: e.target.value }))}
+            placeholder="Search store"
+          />
+          <input
+            value={appSearch.main_category}
+            onChange={(e) =>
+              setAppSearch((s) => ({ ...s, main_category: e.target.value }))
+            }
+            placeholder="Search category"
+          />
+        </div>
+        <div className="actions space-top">
+          <button className="ghost" onClick={handleAppSearch}>
+            Search
+          </button>
+          <button className="ghost" onClick={handleAppSearchClear}>
+            Clear
+          </button>
         </div>
         <div className="grid space-top">
           <input
@@ -836,12 +922,15 @@ export default function App() {
                     </button>
                     <button
                       className="ghost icon-button"
-                      onClick={() =>
-                        handleUpdateProduct(p.parent_asin, "price", p.price ?? 0)
-                      }
+                      onClick={() => handleSyncProduct(p.parent_asin)}
                       title="Sync"
+                      disabled={!!rowSyncing[p.parent_asin]}
                     >
-                      ⟳
+                      {rowSyncing[p.parent_asin] ? (
+                        <span className="spinner small" />
+                      ) : (
+                        "⟳"
+                      )}
                     </button>
                     <button
                       className="ghost icon-button danger"

@@ -139,13 +139,40 @@ def get_product(parent_asin: str) -> Optional[Dict[str, Any]]:
     return _normalize_row(dict(row))
 
 
-def list_products(limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+def list_products(
+    limit: int = 50,
+    offset: int = 0,
+    parent_asin: Optional[str] = None,
+    title: Optional[str] = None,
+    store: Optional[str] = None,
+    main_category: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    clauses = []
+    params: List[Any] = []
+
+    if parent_asin:
+        clauses.append("parent_asin = ?")
+        params.append(parent_asin)
+    if title:
+        clauses.append("title like ?")
+        params.append(f"%{title}%")
+    if store:
+        clauses.append("store like ?")
+        params.append(f"%{store}%")
+    if main_category:
+        clauses.append("main_category like ?")
+        params.append(f"%{main_category}%")
+
+    where = f"where {' and '.join(clauses)}" if clauses else ""
+    sql = (
+        f"select * from products {where} "
+        "order by updated_at desc limit ? offset ?"
+    )
+    params.extend([limit, offset])
+
     con = _connect()
     try:
-        rows = con.execute(
-            "select * from products order by updated_at desc limit ? offset ?",
-            (limit, offset),
-        ).fetchall()
+        rows = con.execute(sql, params).fetchall()
     finally:
         con.close()
     return [_normalize_row(dict(r)) for r in rows]

@@ -123,12 +123,24 @@ export async function searchProducts({ query, k = 5, filter = null }) {
   return res.json();
 }
 
-export async function listProducts({ limit = 50, offset = 0 } = {}) {
-  const res = await fetch(
-    `${API_BASE}/products?limit=${encodeURIComponent(
-      limit
-    )}&offset=${encodeURIComponent(offset)}`
-  );
+export async function listProducts({
+  limit = 50,
+  offset = 0,
+  parentAsin = "",
+  title = "",
+  store = "",
+  mainCategory = "",
+} = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (parentAsin) params.set("parent_asin", parentAsin);
+  if (title) params.set("title", title);
+  if (store) params.set("store", store);
+  if (mainCategory) params.set("main_category", mainCategory);
+
+  const res = await fetch(`${API_BASE}/products?${params.toString()}`);
   if (!res.ok) throw new Error("List products failed");
   return res.json();
 }
@@ -158,6 +170,14 @@ export async function deleteProduct(parentAsin) {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Delete product failed");
+  return res.json();
+}
+
+export async function syncProductEmbedding(parentAsin) {
+  const res = await fetch(`${API_BASE}/products/${parentAsin}/sync`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Sync embedding failed");
   return res.json();
 }
 

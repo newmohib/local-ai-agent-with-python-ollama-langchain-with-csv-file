@@ -218,7 +218,11 @@ curl -X POST http://localhost:9000/search \
   -H "Content-Type: application/json" \
   -d '{"query": "wireless earbuds under $50 with good ratings", "k": 5}'
 ```
+<!-- -- 
+B09S7KR7PD
+wireless earbuds over $1000 and ratings will be minimum 5
 
+ -->
 Fast structured recommendations without LLM generation:
 
 ```bash

@@ -217,6 +217,15 @@ def update_product(parent_asin: str, product: ProductModel):
     return {"status": "ok", "product": row, "embedding_synced": embedding_synced}
 
 
+@app.post("/products/{parent_asin}/sync")
+def sync_product_embedding(parent_asin: str):
+    row = get_product(parent_asin)
+    if not row:
+        return {"status": "not_found", "parent_asin": parent_asin}
+    embedding_synced = upsert_product_embedding(row)
+    return {"status": "ok", "parent_asin": parent_asin, "embedding_synced": embedding_synced}
+
+
 @app.delete("/products/{parent_asin}")
 def remove_product(parent_asin: str):
     deleted = delete_product(parent_asin)
@@ -233,8 +242,22 @@ def read_product(parent_asin: str):
 
 
 @app.get("/products")
-def read_products(limit: int = 50, offset: int = 0):
-    rows = list_products(limit=limit, offset=offset)
+def read_products(
+    limit: int = 50,
+    offset: int = 0,
+    parent_asin: Optional[str] = None,
+    title: Optional[str] = None,
+    store: Optional[str] = None,
+    main_category: Optional[str] = None,
+):
+    rows = list_products(
+        limit=limit,
+        offset=offset,
+        parent_asin=parent_asin,
+        title=title,
+        store=store,
+        main_category=main_category,
+    )
     return {"status": "ok", "count": len(rows), "products": rows}
 
 
