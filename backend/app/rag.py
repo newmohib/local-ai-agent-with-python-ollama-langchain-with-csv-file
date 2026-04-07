@@ -8,6 +8,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from .config import OLLAMA_LLM_MODEL, OLLAMA_BASE_URL
 from .vector_store import metadata_sorted_search, rating_sort_direction, similarity_search
+from .app_db import get_products_by_ids
 
 
 SYSTEM_TEMPLATE = """
@@ -71,14 +72,41 @@ def _retrieve_docs(
 ) -> List[Tuple[Document, float]]:
     sort_direction = rating_sort_direction(question)
     if sort_direction or (filter_obj or {}).get("price_sort"):
-        return metadata_sorted_search(
+        docs_with_scores = metadata_sorted_search(
             question,
             k=k,
             filter_obj=filter_obj,
         )
-    return similarity_search(
+        return _hydrate_docs_with_app_db(docs_with_scores)
+    docs_with_scores = similarity_search(
         query=question, k=k, metadata_filter=metadata_filter, filter_obj=filter_obj
     )
+    return _hydrate_docs_with_app_db(docs_with_scores)
+
+
+def _hydrate_docs_with_app_db(
+    docs_with_scores: List[Tuple[Document, float]]
+) -> List[Tuple[Document, float]]:
+    ids: List[str] = []
+    for d, _ in docs_with_scores:
+        md = d.metadata or {}
+        if md.get("parent_asin"):
+            ids.append(str(md["parent_asin"]))
+    if not ids:
+        return docs_with_scores
+
+    rows = get_products_by_ids(ids)
+    by_id = {row["parent_asin"]: row for row in rows}
+    hydrated: List[Tuple[Document, float]] = []
+    for d, score in docs_with_scores:
+        md = d.metadata or {}
+        row = by_id.get(md.get("parent_asin"))
+        if row:
+            merged = dict(md)
+            merged.update(row)
+            d.metadata = merged
+        hydrated.append((d, score))
+    return hydrated
 
 
 def stream_answer(

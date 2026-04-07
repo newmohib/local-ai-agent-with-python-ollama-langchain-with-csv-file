@@ -167,6 +167,24 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.icon-button {
+  padding: 6px 10px;
+  min-width: 36px;
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  font-weight: 700;
+}
+
+.icon-button.danger {
+  color: #ff7b7b;
+  border-color: rgba(255, 123, 123, 0.4);
+}
+
+.icon-button.danger:hover:not(:disabled) {
+  background: rgba(255, 123, 123, 0.1);
+}
+
 .primary {
   background: linear-gradient(120deg, var(--accent), #ff8a00);
   color: #1a1208;
@@ -264,6 +282,88 @@ button:disabled {
   color: var(--muted);
 }
 
+.card-actions {
+  margin-top: 8px;
+}
+
+.card-detail {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+}
+
+.filter-summary {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: var(--accent-2);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.table {
+  display: grid;
+  gap: 8px;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 1.2fr 2fr 0.8fr 0.8fr 1fr;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.table-row.header {
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+}
+
+.table-row.detail {
+  grid-template-columns: 0.8fr 2.4fr 1fr;
+  align-items: start;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.detail-span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.table-row.empty {
+  justify-content: center;
+  color: var(--muted);
+}
+
+.mono {
+  font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
 .mini {
   padding: 6px 10px;
   border-radius: 10px;
@@ -271,6 +371,12 @@ button:disabled {
   color: var(--text);
   font-size: 12px;
   box-shadow: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 720px) {

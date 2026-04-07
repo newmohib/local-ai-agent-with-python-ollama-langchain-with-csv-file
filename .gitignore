@@ -44,6 +44,7 @@ pnpm-debug.log*
 
 # Local vector databases and generated data
 # backend/data/
+backend/app_db.sqlite3
 chroma_amazon_db/
 backend/chroma_amazon_db/
 qdrant_storage/

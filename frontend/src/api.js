@@ -122,3 +122,61 @@ export async function searchProducts({ query, k = 5, filter = null }) {
   if (!res.ok) throw new Error("Search failed");
   return res.json();
 }
+
+export async function listProducts({ limit = 50, offset = 0 } = {}) {
+  const res = await fetch(
+    `${API_BASE}/products?limit=${encodeURIComponent(
+      limit
+    )}&offset=${encodeURIComponent(offset)}`
+  );
+  if (!res.ok) throw new Error("List products failed");
+  return res.json();
+}
+
+export async function createProduct(product) {
+  const res = await fetch(`${API_BASE}/products`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(product),
+  });
+  if (!res.ok) throw new Error("Create product failed");
+  return res.json();
+}
+
+export async function updateProduct(parentAsin, updates) {
+  const res = await fetch(`${API_BASE}/products/${parentAsin}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parent_asin: parentAsin, ...updates }),
+  });
+  if (!res.ok) throw new Error("Update product failed");
+  return res.json();
+}
+
+export async function deleteProduct(parentAsin) {
+  const res = await fetch(`${API_BASE}/products/${parentAsin}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Delete product failed");
+  return res.json();
+}
+
+export async function importProducts({
+  csvPath,
+  limit = 500,
+  keyword = null,
+  skipExisting = true,
+} = {}) {
+  const res = await fetch(`${API_BASE}/products/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      csv_path: csvPath,
+      limit,
+      keyword,
+      skip_existing: skipExisting,
+    }),
+  });
+  if (!res.ok) throw new Error("Import products failed");
+  return res.json();
+}

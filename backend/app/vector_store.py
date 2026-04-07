@@ -141,7 +141,45 @@ def get_vector_store() -> VectorStore:
     )
 
 
-def _build_document_from_row(row: Dict[str, Any], fallback_id: str) -> Optional[Document]:
+def upsert_product_embedding(row: Dict[str, Any]) -> bool:
+    parent_asin = row.get("parent_asin")
+    if not parent_asin:
+        return False
+
+    doc = _build_document_from_row(
+        row=row, fallback_id="app_db", id_override=str(parent_asin)
+    )
+    if doc is None:
+        return False
+
+    vector_store = get_vector_store()
+    try:
+        vector_store.delete(ids=[doc.id])
+    except Exception:
+        # Best-effort delete for upsert.
+        pass
+    vector_store.add_documents(documents=[doc], ids=[doc.id])
+    _similarity_search_no_filter_cached.cache_clear()
+    return True
+
+
+def delete_product_embedding(parent_asin: str) -> bool:
+    if not parent_asin:
+        return False
+    vector_store = get_vector_store()
+    try:
+        vector_store.delete(ids=[parent_asin])
+    except Exception:
+        return False
+    _similarity_search_no_filter_cached.cache_clear()
+    return True
+
+
+def _build_document_from_row(
+    row: Dict[str, Any],
+    fallback_id: str,
+    id_override: Optional[str] = None,
+) -> Optional[Document]:
     title = (row.get("title") or "").strip()
     desc = (row.get("description") or "").strip()
     features = row.get("features") or []
@@ -178,7 +216,7 @@ def _build_document_from_row(row: Dict[str, Any], fallback_id: str) -> Optional[
     }
 
     parent_asin = str(row.get("parent_asin") or "row")
-    doc_id = f"{parent_asin}-{fallback_id}"
+    doc_id = id_override or f"{parent_asin}-{fallback_id}"
 
     return Document(
         page_content=page_content,
@@ -285,16 +323,26 @@ def build_documents(
     if source == "csv":
         rows = _iter_csv_rows(csv_path or LOCAL_CSV_PATH)
         desc = "Building Documents from CSV"
+    elif source == "app_db":
+        from .app_db import iter_products
+
+        rows = iter_products(limit=None, keyword=keyword)
+        desc = "Building Documents from App DB"
     elif source == "hf":
         rows = load_dataset(HF_DATASET_ID, split=HF_SPLIT)
         desc = "Building Documents from HuggingFace"
     else:
-        raise ValueError(f"Unsupported DATA_SOURCE: {source}. Use 'csv' or 'hf'.")
+        raise ValueError(
+            f"Unsupported DATA_SOURCE: {source}. Use 'csv', 'app_db', or 'hf'."
+        )
 
     for i, row in enumerate(tqdm(rows, desc=desc)):
         if keyword and not _matches_keyword(row, keyword):
             continue
-        doc = _build_document_from_row(row=row, fallback_id=str(i))
+        id_override = str(row.get("parent_asin")) if source == "app_db" else None
+        doc = _build_document_from_row(
+            row=row, fallback_id=str(i), id_override=id_override
+        )
         if doc is None:
             continue
         docs.append(doc)

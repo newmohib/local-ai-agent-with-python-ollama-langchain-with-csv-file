@@ -1,4 +1,7 @@
-<!-- codex resume  -->
+<!-- codex resume 019c855e-6ebf-7602-8546-109a32c7aab1 -->
+<!-- and for sync create a button for and also insert all data from csv file to app_db -->
+<!-- 1. Background sync worker (queue-based) for large imports. -->
+<!--  If you want a progress bar for import/sync, I can wire it to the streaming /index/stream endpoint and show live progress. -->
 # Amazon Products RAG Search
 
 Local RAG product-search app using:
@@ -16,13 +19,15 @@ The app does **not** search the CSV file directly for normal queries.
 The normal flow is:
 
 1. Export products from HuggingFace into a local CSV file.
-2. Index the CSV rows into the vector DB.
-3. Query `/search` or `/recommendations`; the backend searches the vector DB.
+2. Import the CSV into the **App DB (SQLite)**.
+3. Sync embeddings from the App DB into the vector DB.
+4. Query `/search` or `/recommendations`; the backend searches the vector DB and returns rows from the App DB.
 
 Why this matters:
 
 - The CSV is your source data file.
-- Chroma/Qdrant is the searchable RAG database.
+- The App DB (SQLite) is the system of record for inserts/updates/deletes.
+- Chroma/Qdrant is the searchable RAG database synced from the App DB.
 - Ollama creates embeddings during indexing and also embeds each user query during search.
 - If you update the CSV, re-run indexing with `reset: true` to refresh the vector DB.
 
@@ -65,8 +70,9 @@ PORT=9000
 VECTOR_DB=chroma
 CHROMA_DIR=./chroma_amazon_db
 COLLECTION_NAME=amazon_products
-DATA_SOURCE=csv
+DATA_SOURCE=app_db
 LOCAL_CSV_PATH=./data/amazon_products.csv
+APP_DB_PATH=./app_db.sqlite3
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_EMBED_MODEL=mxbai-embed-large
 OLLAMA_LLM_MODEL=llama3.2
@@ -146,14 +152,30 @@ backend/data/amazon_products.csv
 
 `backend/data/` is ignored by Git.
 
-## Index CSV Into RAG DB
+## Import CSV Into App DB
+
+Import CSV rows into the SQLite App DB:
+
+```bash
+curl -X POST http://localhost:9000/products/import \
+  -H "Content-Type: application/json" \
+  -d '{\"csv_path\": \"./data/amazon_products.csv\", \"limit\": 500, \"keyword\": \"earbuds\"}'
+```
+
+Check App DB count:
+
+```bash
+curl http://localhost:9000/status
+```
+
+## Sync App DB -> Vector DB (RAG)
 
 Use the streaming endpoint so you can see progress:
 
 ```bash
 curl -N -X POST http://localhost:9000/index/stream \
   -H "Content-Type: application/json" \
-  -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
+  -d '{"limit": 500, "keyword": "earbuds", "data_source": "app_db", "batch_size": 10, "reset": true}'
 ```
 
 Non-streaming version:
@@ -161,14 +183,13 @@ Non-streaming version:
 ```bash
 curl -X POST http://localhost:9000/index \
   -H "Content-Type: application/json" \
-  -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
+  -d '{"limit": 500, "keyword": "earbuds", "data_source": "app_db", "batch_size": 10, "reset": true}'
 ```
 
 Notes:
 
-- `data_source: "csv"` tells backend to read rows from the local CSV.
-- `csv_path: "./data/amazon_products.csv"` is relative to the backend process working directory.
-- `reset: true` clears the old vector index before indexing the CSV.
+- `data_source: "app_db"` tells backend to read rows from the SQLite App DB.
+- `reset: true` clears the old vector index before indexing the App DB.
 - `batch_size: 10` avoids very large embedding requests to Ollama.
 
 Check vector DB status:
@@ -228,6 +249,39 @@ Fast streaming recommendations without LLM:
 curl -N -X POST http://localhost:9000/recommendations/stream \
   -H "Content-Type: application/json" \
   -d '{"question": "wireless earbuds under $50 with good ratings", "k": 5}'
+```
+
+## App DB CRUD (Auto-Sync Embeddings)
+
+Create or update a product (syncs embedding immediately):
+
+```bash
+curl -X POST http://localhost:9000/products \
+  -H "Content-Type: application/json" \
+  -d '{
+    "parent_asin": "TEST-ASIN-001",
+    "title": "Test Earbuds",
+    "description": "Bluetooth earbuds with charging case",
+    "main_category": "Electronics",
+    "store": "Test Store",
+    "average_rating": 4.7,
+    "rating_number": 150,
+    "price": 39.99
+  }'
+```
+
+Update by id:
+
+```bash
+curl -X PUT http://localhost:9000/products/TEST-ASIN-001 \
+  -H "Content-Type: application/json" \
+  -d '{\"parent_asin\":\"TEST-ASIN-001\",\"price\":35.99,\"average_rating\":4.8}'
+```
+
+Delete (also removes embedding):
+
+```bash
+curl -X DELETE http://localhost:9000/products/TEST-ASIN-001
 ```
 
 ## Query Examples
@@ -306,7 +360,7 @@ cd frontend
 Frontend supports:
 
 - Export HuggingFace data to CSV.
-- Index local CSV into vector DB.
+- Index App DB into vector DB.
 - Fast JSON recommendations.
 - Search result cards.
 - Copy JSON.
@@ -324,6 +378,12 @@ Frontend supports:
 - `POST /recommendations/stream`
 - `POST /chat`
 - `POST /chat/stream`
+- `GET /products`
+- `GET /products/{parent_asin}`
+- `POST /products`
+- `PUT /products/{parent_asin}`
+- `DELETE /products/{parent_asin}`
+- `POST /products/import`
 
 ## Troubleshooting
 
@@ -338,7 +398,7 @@ If count is `0` or old data is still present, reindex with `reset: true`:
 ```bash
 curl -N -X POST http://localhost:9000/index/stream \
   -H "Content-Type: application/json" \
-  -d '{"limit": 500, "keyword": "earbuds", "data_source": "csv", "csv_path": "./data/amazon_products.csv", "batch_size": 10, "reset": true}'
+  -d '{"limit": 500, "keyword": "earbuds", "data_source": "app_db", "batch_size": 10, "reset": true}'
 ```
 
 If indexing fails with Ollama context-length errors, lower this in `backend/.env`:

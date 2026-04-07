@@ -7,6 +7,11 @@ import {
   chatJson,
   searchProducts,
   getStatus,
+  listProducts,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  importProducts,
 } from "./api";
 import "./App.css";
 
@@ -18,11 +23,29 @@ export default function App() {
   const [jsonAnswer, setJsonAnswer] = useState(null);
   const [jsonSearch, setJsonSearch] = useState(null);
   const [activeMode, setActiveMode] = useState("stream");
+  const [lastFilter, setLastFilter] = useState(null);
   const [status, setStatus] = useState(null);
   const [statusError, setStatusError] = useState("");
   const [indexKeyword, setIndexKeyword] = useState("earbuds");
   const [indexLimit, setIndexLimit] = useState(500);
   const [csvPath, setCsvPath] = useState("./data/amazon_products.csv");
+  const [products, setProducts] = useState([]);
+  const [productError, setProductError] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [expandedRows, setExpandedRows] = useState(() => new Set());
+  const [appTableCollapsed, setAppTableCollapsed] = useState(false);
+  const [expandedAnswerCards, setExpandedAnswerCards] = useState(() => new Set());
+  const [expandedSearchCards, setExpandedSearchCards] = useState(() => new Set());
+  const [productForm, setProductForm] = useState({
+    parent_asin: "",
+    title: "",
+    price: "",
+    average_rating: "",
+    rating_number: "",
+    main_category: "",
+    store: "",
+  });
 
   // simple filters
   const [category, setCategory] = useState("");
@@ -49,6 +72,7 @@ export default function App() {
 
   useEffect(() => {
     refreshStatus();
+    refreshProducts();
   }, []);
 
   async function handleIndex() {
@@ -93,6 +117,142 @@ export default function App() {
     }
   }
 
+  async function refreshProducts() {
+    try {
+      setProductError("");
+      const out = await listProducts({ limit: 50, offset: 0 });
+      setProducts(out.products || []);
+    } catch (e) {
+      setProductError(String(e));
+    }
+  }
+
+  async function handleCreateProduct() {
+    try {
+      setProductError("");
+      const payload = {
+        parent_asin: productForm.parent_asin.trim(),
+        title: productForm.title.trim() || null,
+        price: productForm.price ? Number(productForm.price) : null,
+        average_rating: productForm.average_rating
+          ? Number(productForm.average_rating)
+          : null,
+        rating_number: productForm.rating_number
+          ? Number(productForm.rating_number)
+          : null,
+        main_category: productForm.main_category.trim() || null,
+        store: productForm.store.trim() || null,
+      };
+      if (!payload.parent_asin) {
+        setProductError("parent_asin is required");
+        return;
+      }
+      await createProduct(payload);
+      setProductForm({
+        parent_asin: "",
+        title: "",
+        price: "",
+        average_rating: "",
+        rating_number: "",
+        main_category: "",
+        store: "",
+      });
+      await refreshProducts();
+      await refreshStatus();
+    } catch (e) {
+      setProductError(String(e));
+    }
+  }
+
+  async function handleImportToAppDb() {
+    try {
+      setImporting(true);
+      setProductError("");
+      const out = await importProducts({
+        csvPath,
+        limit: Number(indexLimit),
+        keyword: indexKeyword.trim() || null,
+        skipExisting: true,
+      });
+      setAnswer(`Import result: ${JSON.stringify(out, null, 2)}`);
+      await refreshProducts();
+      await refreshStatus();
+    } catch (e) {
+      setProductError(String(e));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function handleSyncEmbeddings() {
+    try {
+      setSyncing(true);
+      setProductError("");
+      const out = await indexDataset({
+        limit: Number(indexLimit),
+        keyword: indexKeyword.trim() || null,
+        dataSource: "app_db",
+        csvPath,
+      });
+      setAnswer(`Sync result: ${JSON.stringify(out, null, 2)}`);
+      await refreshStatus();
+    } catch (e) {
+      setProductError(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleUpdateProduct(parentAsin, field, value) {
+    try {
+      setProductError("");
+      const updates = { [field]: value };
+      await updateProduct(parentAsin, updates);
+      await refreshProducts();
+      await refreshStatus();
+    } catch (e) {
+      setProductError(String(e));
+    }
+  }
+
+  async function handleDeleteProduct(parentAsin) {
+    try {
+      setProductError("");
+      await deleteProduct(parentAsin);
+      await refreshProducts();
+      await refreshStatus();
+    } catch (e) {
+      setProductError(String(e));
+    }
+  }
+
+  function toggleRow(parentAsin) {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentAsin)) next.delete(parentAsin);
+      else next.add(parentAsin);
+      return next;
+    });
+  }
+
+  function toggleAnswerCard(key) {
+    setExpandedAnswerCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleSearchCard(key) {
+    setExpandedSearchCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   function buildFilter() {
     const filter = {};
     if (category.trim()) filter.main_category = category.trim();
@@ -135,6 +295,7 @@ export default function App() {
     setActiveMode("stream");
 
     const finalFilter = buildFilter();
+    setLastFilter(finalFilter);
 
     try {
       await streamChat(
@@ -157,6 +318,7 @@ export default function App() {
     setActiveMode("fast-stream");
 
     const finalFilter = buildFilter();
+    setLastFilter(finalFilter);
 
     try {
       await streamRecommendations(
@@ -189,6 +351,7 @@ export default function App() {
     setJsonSearch(null);
     setActiveMode("json");
     const finalFilter = buildFilter();
+    setLastFilter(finalFilter);
 
     try {
       const out = await chatJson({
@@ -212,6 +375,7 @@ export default function App() {
     setJsonSearch(null);
     setActiveMode("search");
     const finalFilter = buildFilter();
+    setLastFilter(finalFilter);
 
     try {
       const out = await searchProducts({
@@ -429,13 +593,20 @@ export default function App() {
               Copy JSON
             </button>
           </div>
+          {lastFilter && (
+            <div className="filter-summary">
+              Filter: {JSON.stringify(lastFilter)}
+            </div>
+          )}
           <pre className="result-body">
             {answer || "Answer will stream here..."}
           </pre>
           {jsonAnswer?.recommendations?.length ? (
             <div className="cards">
-              {jsonAnswer.recommendations.map((r, idx) => (
-                <div className="card" key={`${r.parent_asin || idx}`}>
+              {jsonAnswer.recommendations.map((r, idx) => {
+                const cardKey = String(r.parent_asin || idx);
+                return (
+                <div className="card" key={cardKey}>
                   <div className="card-title">{r.title || "Untitled"}</div>
                   <div className="card-meta">
                     {r.main_category && <span>{r.main_category}</span>}
@@ -452,8 +623,25 @@ export default function App() {
                     )}
                     {r.parent_asin && <span>{r.parent_asin}</span>}
                   </div>
+                  <div className="card-actions">
+                    <button
+                      className="ghost"
+                      onClick={() => toggleAnswerCard(cardKey)}
+                    >
+                      {expandedAnswerCards.has(cardKey)
+                        ? "Hide Details"
+                        : "Details"}
+                    </button>
+                  </div>
+                  {expandedAnswerCards.has(cardKey) && (
+                    <div className="card-detail">
+                      <div>Store: {r.store ?? "-"}</div>
+                      <div>Date: {r.date_first_available ?? "-"}</div>
+                      <div>Image: {r.image ? "Yes" : "No"}</div>
+                    </div>
+                  )}
                 </div>
-              ))}
+              )})}
             </div>
           ) : null}
         </div>
@@ -476,8 +664,10 @@ export default function App() {
           </pre>
           {jsonSearch?.results?.length ? (
             <div className="cards">
-              {jsonSearch.results.map((r, idx) => (
-                <div className="card" key={`${r.parent_asin || idx}`}>
+              {jsonSearch.results.map((r, idx) => {
+                const cardKey = String(r.parent_asin || idx);
+                return (
+                <div className="card" key={cardKey}>
                   <div className="card-title">{r.title || "Untitled"}</div>
                   <div className="card-meta">
                     {r.main_category && <span>{r.main_category}</span>}
@@ -494,11 +684,177 @@ export default function App() {
                     )}
                     {r.parent_asin && <span>{r.parent_asin}</span>}
                   </div>
+                  <div className="card-actions">
+                    <button
+                      className="ghost"
+                      onClick={() => toggleSearchCard(cardKey)}
+                    >
+                      {expandedSearchCards.has(cardKey)
+                        ? "Hide Details"
+                        : "Details"}
+                    </button>
+                  </div>
+                  {expandedSearchCards.has(cardKey) && (
+                    <div className="card-detail">
+                      <div>Store: {r.store ?? "-"}</div>
+                      <div>Date: {r.date_first_available ?? "-"}</div>
+                      <div>Image: {r.image ? "Yes" : "No"}</div>
+                      <div>Snippet: {r.snippet ?? "-"}</div>
+                    </div>
+                  )}
                 </div>
-              ))}
+              )})}
             </div>
           ) : null}
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2>App DB</h2>
+          <div className="actions">
+            <button
+              className="ghost"
+              onClick={() => setAppTableCollapsed((prev) => !prev)}
+            >
+              {appTableCollapsed ? "Expand Table ▸" : "Collapse Table ▾"}
+            </button>
+          </div>
+        </div>
+        <div className="hint">
+          Manage SQLite records. Insert/update/delete auto-sync embeddings.
+        </div>
+        <div className="grid space-top">
+          <input
+            value={productForm.parent_asin}
+            onChange={(e) =>
+              setProductForm((p) => ({ ...p, parent_asin: e.target.value }))
+            }
+            placeholder="parent_asin"
+          />
+          <input
+            value={productForm.title}
+            onChange={(e) =>
+              setProductForm((p) => ({ ...p, title: e.target.value }))
+            }
+            placeholder="Title"
+          />
+          <input
+            value={productForm.price}
+            onChange={(e) =>
+              setProductForm((p) => ({ ...p, price: e.target.value }))
+            }
+            placeholder="Price"
+          />
+          <input
+            value={productForm.average_rating}
+            onChange={(e) =>
+              setProductForm((p) => ({ ...p, average_rating: e.target.value }))
+            }
+            placeholder="Avg rating"
+          />
+          <input
+            value={productForm.rating_number}
+            onChange={(e) =>
+              setProductForm((p) => ({ ...p, rating_number: e.target.value }))
+            }
+            placeholder="Rating count"
+          />
+          <input
+            value={productForm.main_category}
+            onChange={(e) =>
+              setProductForm((p) => ({ ...p, main_category: e.target.value }))
+            }
+            placeholder="Main category"
+          />
+          <input
+            value={productForm.store}
+            onChange={(e) =>
+              setProductForm((p) => ({ ...p, store: e.target.value }))
+            }
+            placeholder="Store"
+          />
+        </div>
+        <div className="actions space-top">
+          <button className="primary" onClick={handleCreateProduct}>
+            Add / Update
+          </button>
+          <button className="ghost" onClick={handleImportToAppDb} disabled={importing}>
+            {importing ? <span className="spinner" /> : "Import CSV (Skip Existing)"}
+          </button>
+          <button className="ghost" onClick={handleSyncEmbeddings} disabled={syncing}>
+            {syncing ? <span className="spinner" /> : "Sync Embeddings"}
+          </button>
+          {productError && <span className="hint">{productError}</span>}
+        </div>
+
+        {!appTableCollapsed && (
+          <div className="table space-top">
+            <div className="table-row header">
+              <div>ASIN</div>
+              <div>Title</div>
+              <div>Price</div>
+              <div>Rating</div>
+              <div>Actions</div>
+            </div>
+            {products.length === 0 ? (
+              <div className="table-row empty">No products yet.</div>
+            ) : (
+              products.map((p, idx) => {
+                const rowKey = String(p.parent_asin ?? idx);
+                return (
+                <div key={rowKey}>
+                  <div className="table-row">
+                    <div className="mono">{p.parent_asin ?? "-"}</div>
+                    <div title={p.title || ""}>{p.title || "Untitled"}</div>
+                    <div>${p.price ?? "-"}</div>
+                    <div>{p.average_rating ?? "-"}</div>
+                    <div className="actions">
+                    <button
+                      className="ghost icon-button"
+                      onClick={() => toggleRow(rowKey)}
+                      title="Details"
+                    >
+                      {expandedRows.has(rowKey) ? "▾" : "▸"}
+                    </button>
+                    <button
+                      className="ghost icon-button"
+                      onClick={() =>
+                        handleUpdateProduct(p.parent_asin, "price", p.price ?? 0)
+                      }
+                      title="Sync"
+                    >
+                      ⟳
+                    </button>
+                    <button
+                      className="ghost icon-button danger"
+                      onClick={() => handleDeleteProduct(p.parent_asin)}
+                      title="Delete"
+                    >
+                      ✕
+                    </button>
+                    </div>
+                  </div>
+                  {expandedRows.has(rowKey) && (
+                    <div className="table-row detail">
+                      <div className="mono">Details</div>
+                      <div className="detail-grid">
+                        <div>Category: {p.main_category ?? "-"}</div>
+                        <div>Store: {p.store ?? "-"}</div>
+                        <div>Rating Count: {p.rating_number ?? "-"}</div>
+                        <div>Date: {p.date_first_available ?? "-"}</div>
+                        <div>Image: {p.image ? "Yes" : "No"}</div>
+                      </div>
+                      <div className="detail-span">
+                        {p.description ? p.description : "No description"}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )})
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
