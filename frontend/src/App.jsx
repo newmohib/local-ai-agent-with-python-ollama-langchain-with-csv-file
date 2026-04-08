@@ -89,6 +89,17 @@ export default function App() {
     main_category: "",
     store: "",
   });
+  const userExtraCols = userSemanticResults.length > 0
+    ? getUserExtraColumns(userSemanticQuery)
+    : [];
+  const userGridTemplate = [
+    "1.2fr",
+    "2fr",
+    "0.9fr",
+    "0.9fr",
+    ...userExtraCols.map(() => "0.7fr"),
+    "1fr",
+  ].join(" ");
 
   // simple filters
   const [category, setCategory] = useState("");
@@ -102,6 +113,38 @@ export default function App() {
   const [ratingCountMax, setRatingCountMax] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  function getUserExtraColumns(query) {
+    const q = (query || "").toLowerCase();
+    if (!q) return [];
+    const candidates = [
+      { keys: ["age"], key: "age", label: "Age" },
+      { keys: ["dob", "birth"], key: "dob", label: "DOB" },
+      { keys: ["gender"], key: "gender", label: "Gender" },
+      { keys: ["policy", "policynum"], key: "policynum", label: "Policy" },
+      { keys: ["client", "clntid"], key: "clntid", label: "Client ID" },
+      { keys: ["nid"], key: "nid", label: "NID" },
+      { keys: ["father"], key: "father_name", label: "Father Name" },
+      { keys: ["issue"], key: "issue_date", label: "Issue Date" },
+      { keys: ["address", "addr"], key: "addr1", label: "Address" },
+      { keys: ["first"], key: "first_name", label: "First Name" },
+      { keys: ["last"], key: "last_name", label: "Last Name" },
+      { keys: ["full", "name"], key: "full_name", label: "Full Name" },
+      { keys: ["city"], key: "city", label: "City" },
+      { keys: ["mobile", "phone"], key: "mobile", label: "Mobile" },
+      { keys: ["remarks"], key: "remarks", label: "Remarks" },
+    ];
+    const picked = [];
+    for (const item of candidates) {
+      if (picked.length >= 2) break;
+      if (item.keys.some((k) => q.includes(k))) {
+        if (!picked.find((p) => p.key === item.key)) {
+          picked.push(item);
+        }
+      }
+    }
+    return picked.slice(0, 2);
+  }
 
   async function refreshStatus() {
     try {
@@ -188,7 +231,7 @@ export default function App() {
     try {
       setUserError("");
       const out = await listUsers({
-        limit: 50,
+        limit: 10,
         offset: 0,
         filters: {},
       });
@@ -1153,41 +1196,6 @@ export default function App() {
             </button>
           </div>
         </div>
-        <div className="row space-top">
-          <input
-            value={userSemanticQuery}
-            onChange={(e) => setUserSemanticQuery(e.target.value)}
-            placeholder="Semantic search (e.g., Kamal from Rajshahi)"
-          />
-          <button
-            className="btn-soft btn-medium"
-            onClick={handleUserSemanticSearch}
-          >
-            Semantic Search
-          </button>
-        </div>
-
-        {userSemanticResults.length > 0 && (
-          <div className="table space-top">
-            <div className="table-row header">
-              <div>ID</div>
-              <div>Name</div>
-              <div>City</div>
-              <div>Mobile</div>
-              <div>Score</div>
-            </div>
-            {userSemanticResults.map((u) => (
-              <div className="table-row" key={u.id}>
-                <div className="mono">{u.id}</div>
-                <div>{u.full_name || "-"}</div>
-                <div>{u.city || "-"}</div>
-                <div>{u.mobile || "-"}</div>
-                <div>{u.score?.toFixed ? u.score.toFixed(4) : u.score}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
         <div className="grid space-top">
           <input
             value={userForm.id}
@@ -1260,30 +1268,50 @@ export default function App() {
           </button>
         </div>
 
+        <div className="row space-top">
+          <input
+            value={userSemanticQuery}
+            onChange={(e) => setUserSemanticQuery(e.target.value)}
+            placeholder="Semantic search (e.g., Kamal from Rajshahi)"
+          />
+          <button
+            className="btn-soft btn-medium"
+            onClick={handleUserSemanticSearch}
+          >
+            Semantic Search
+          </button>
+        </div>
+
         {userError && <span className="hint">{userError}</span>}
 
         <div className="table space-top">
-          <div className="table-row header">
+          <div className="table-row header" style={{ gridTemplateColumns: userGridTemplate }}>
             <div>ID</div>
             <div>Name</div>
             <div>City</div>
             <div>Mobile</div>
+            {userExtraCols.map((col) => (
+              <div className="extra-col" key={col.key}>{col.label}</div>
+            ))}
             <div>Actions</div>
           </div>
-          {users.length === 0 ? (
-            <div className="table-row empty">No users yet.</div>
+          {(userSemanticResults.length > 0 ? userSemanticResults : users).length === 0 ? (
+            <div className="table-row empty">No users found.</div>
           ) : (
-            users.map((u) => {
+            (userSemanticResults.length > 0 ? userSemanticResults : users).map((u) => {
               const key = String(u.id);
               const name =
                 u.full_name || [u.first_name, u.last_name].filter(Boolean).join(" ");
               return (
                 <div key={key}>
-                  <div className="table-row">
+                  <div className="table-row" style={{ gridTemplateColumns: userGridTemplate }}>
                     <div className="mono">{u.id}</div>
                     <div>{name || "-"}</div>
                     <div>{u.city || "-"}</div>
                     <div>{u.mobile || "-"}</div>
+                    {userExtraCols.map((col) => (
+                      <div className="extra-col" key={col.key}>{u[col.key] || "-"}</div>
+                    ))}
                     <div className="actions">
                       <button className="ghost icon-button" onClick={() => toggleUserRow(key)}>
                         {userExpanded.has(key) ? "▾" : "▸"}

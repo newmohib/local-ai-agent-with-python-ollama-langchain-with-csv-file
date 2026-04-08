@@ -489,6 +489,7 @@ def semantic_search_users(
             "dob",
             "date",
             "gender",
+            "father",
         ]
     ):
         rows = search_users(query=query, limit=k, offset=0)

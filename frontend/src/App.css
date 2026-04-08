@@ -412,6 +412,13 @@ button:disabled {
   font-size: 13px;
 }
 
+.table-row .extra-col {
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .table-row.header {
   background: rgba(255, 255, 255, 0.06);
   font-weight: 600;
