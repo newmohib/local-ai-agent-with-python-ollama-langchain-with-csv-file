@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   exportDataset,
   indexDataset,
@@ -13,10 +14,20 @@ import {
   deleteProduct,
   syncProductEmbedding,
   importProducts,
+  listUsers,
+  createUser,
+  updateUser,
+  deleteUser,
+  importUsers,
+  syncUserEmbedding,
+  syncUsersEmbeddings,
+  semanticSearchUsers,
 } from "./api";
 import "./App.css";
 
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,6 +50,29 @@ export default function App() {
   const [resultsCollapsed, setResultsCollapsed] = useState(false);
   const [expandedAnswerCards, setExpandedAnswerCards] = useState(() => new Set());
   const [expandedSearchCards, setExpandedSearchCards] = useState(() => new Set());
+  const [users, setUsers] = useState([]);
+  const [userError, setUserError] = useState("");
+  const [userSemanticQuery, setUserSemanticQuery] = useState("");
+  const [userSemanticResults, setUserSemanticResults] = useState([]);
+  const [userForm, setUserForm] = useState({
+    id: "",
+    first_name: "",
+    last_name: "",
+    full_name: "",
+    city: "",
+    mobile: "",
+    dob: "",
+    gender: "",
+    policynum: "",
+    clntid: "",
+  });
+  const [userImporting, setUserImporting] = useState(false);
+  const [userExpanded, setUserExpanded] = useState(() => new Set());
+  const [userSyncing, setUserSyncing] = useState({});
+  const [usersBulkSyncing, setUsersBulkSyncing] = useState(false);
+
+  const showProducts = location.pathname.startsWith("/products") || location.pathname === "/";
+  const showUsers = location.pathname.startsWith("/users");
   const [rowSyncing, setRowSyncing] = useState({});
   const [appSearch, setAppSearch] = useState({
     parent_asin: "",
@@ -82,7 +116,14 @@ export default function App() {
   useEffect(() => {
     refreshStatus();
     refreshProducts();
+    refreshUsers();
   }, []);
+
+  useEffect(() => {
+    if (location.pathname === "/") {
+      navigate("/products", { replace: true });
+    }
+  }, [location.pathname, navigate]);
 
   async function handleIndex() {
     setLoading(true);
@@ -140,6 +181,20 @@ export default function App() {
       setProducts(out.products || []);
     } catch (e) {
       setProductError(String(e));
+    }
+  }
+
+  async function refreshUsers() {
+    try {
+      setUserError("");
+      const out = await listUsers({
+        limit: 50,
+        offset: 0,
+        filters: {},
+      });
+      setUsers(out.users || []);
+    } catch (e) {
+      setUserError(String(e));
     }
   }
 
@@ -255,6 +310,15 @@ export default function App() {
     }
   }
 
+  function toggleUserRow(id) {
+    setUserExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   async function handleAppSearch() {
     await refreshProducts();
   }
@@ -267,6 +331,84 @@ export default function App() {
       store: "",
       main_category: "",
     });
+  }
+
+  async function handleUserSemanticSearch() {
+    try {
+      setUserError("");
+      if (!userSemanticQuery.trim()) {
+        setUserSemanticResults([]);
+        return;
+      }
+      const out = await semanticSearchUsers({
+        query: userSemanticQuery.trim(),
+        k: 5,
+      });
+      setUserSemanticResults(out.results || []);
+    } catch (e) {
+      setUserError(String(e));
+    }
+  }
+
+  async function handleUserCreate() {
+    try {
+      setUserError("");
+      if (!userForm.id) {
+        setUserError("id is required");
+        return;
+      }
+      await createUser(userForm);
+      await refreshUsers();
+    } catch (e) {
+      setUserError(String(e));
+    }
+  }
+
+  async function handleUserDelete(id) {
+    try {
+      setUserError("");
+      await deleteUser(id);
+      await refreshUsers();
+    } catch (e) {
+      setUserError(String(e));
+    }
+  }
+
+  async function handleUserImport() {
+    try {
+      setUserImporting(true);
+      setUserError("");
+      await importUsers({ csvPath: "./data/user_data.csv", limit: 1000 });
+      await refreshUsers();
+    } catch (e) {
+      setUserError(String(e));
+    } finally {
+      setUserImporting(false);
+    }
+  }
+
+  async function handleUserSync(id) {
+    try {
+      setUserError("");
+      setUserSyncing((prev) => ({ ...prev, [id]: true }));
+      await syncUserEmbedding(id);
+    } catch (e) {
+      setUserError(String(e));
+    } finally {
+      setUserSyncing((prev) => ({ ...prev, [id]: false }));
+    }
+  }
+
+  async function handleUsersBulkSync() {
+    try {
+      setUsersBulkSyncing(true);
+      setUserError("");
+      await syncUsersEmbeddings({ limit: 10000 });
+    } catch (e) {
+      setUserError(String(e));
+    } finally {
+      setUsersBulkSyncing(false);
+    }
   }
 
   function toggleRow(parentAsin) {
@@ -445,6 +587,20 @@ export default function App() {
             Local Ollama embeddings, fast retrieval, and streaming answers with
             optional Qdrant.
           </p>
+          <div className="tabs">
+            <NavLink
+              to="/products"
+              className={({ isActive }) => `tab ${isActive ? "active" : ""}`}
+            >
+              Products
+            </NavLink>
+            <NavLink
+              to="/users"
+              className={({ isActive }) => `tab ${isActive ? "active" : ""}`}
+            >
+              Users
+            </NavLink>
+          </div>
           <div className="status">
             {status ? (
               <div className="status-line">
@@ -474,7 +630,8 @@ export default function App() {
         </div>
       </header>
 
-      <section className="panel">
+      {showProducts && (
+<section className="panel">
         <div className="panel-head">
           <h2>Local CSV</h2>
           <div className="hint">Export from HuggingFace once, then index from CSV</div>
@@ -508,7 +665,10 @@ export default function App() {
         </div>
       </section>
 
-      <section className="panel">
+)}
+
+      {showProducts && (
+<section className="panel">
         <div className="panel-head">
           <h2>Query</h2>
           <div className="k-control">
@@ -562,7 +722,10 @@ export default function App() {
         </div>
       </section>
 
-      <section className="panel">
+)}
+
+      {showProducts && (
+<section className="panel">
         <div className="panel-head">
           <h2>Filters</h2>
           <div className="hint">Optional, applies to all actions</div>
@@ -621,7 +784,10 @@ export default function App() {
         </div>
       </section>
 
-      <section className="results-section">
+)}
+
+      {showProducts && (
+<section className="results-section">
         <div className="results-head">
           <div className="results-title">Results</div>
           <button
@@ -776,6 +942,9 @@ export default function App() {
         </div>
       </section>
 
+)}
+
+      {showProducts && (
 <section className="panel">
         <div className="panel-head">
           <h2>App DB</h2>
@@ -962,6 +1131,202 @@ export default function App() {
           </div>
         )}
       </section>
+
+)}
+
+      {showUsers && (
+<section className="panel">
+        <div className="panel-head">
+          <h2>Users</h2>
+          <div className="actions">
+            <button className="ghost" onClick={handleUserImport} disabled={userImporting}>
+              Import Users CSV
+              {userImporting && <span className="spinner" />}
+            </button>
+            <button
+              className="ghost"
+              onClick={handleUsersBulkSync}
+              disabled={usersBulkSyncing}
+            >
+              Sync Users
+              {usersBulkSyncing && <span className="spinner" />}
+            </button>
+          </div>
+        </div>
+        <div className="row space-top">
+          <input
+            value={userSemanticQuery}
+            onChange={(e) => setUserSemanticQuery(e.target.value)}
+            placeholder="Semantic search (e.g., Kamal from Rajshahi)"
+          />
+          <button
+            className="btn-soft btn-medium"
+            onClick={handleUserSemanticSearch}
+          >
+            Semantic Search
+          </button>
+        </div>
+
+        {userSemanticResults.length > 0 && (
+          <div className="table space-top">
+            <div className="table-row header">
+              <div>ID</div>
+              <div>Name</div>
+              <div>City</div>
+              <div>Mobile</div>
+              <div>Score</div>
+            </div>
+            {userSemanticResults.map((u) => (
+              <div className="table-row" key={u.id}>
+                <div className="mono">{u.id}</div>
+                <div>{u.full_name || "-"}</div>
+                <div>{u.city || "-"}</div>
+                <div>{u.mobile || "-"}</div>
+                <div>{u.score?.toFixed ? u.score.toFixed(4) : u.score}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="grid space-top">
+          <input
+            value={userForm.id}
+            onChange={(e) => setUserForm((u) => ({ ...u, id: e.target.value }))}
+            placeholder="User ID"
+          />
+          <input
+            value={userForm.first_name}
+            onChange={(e) =>
+              setUserForm((u) => ({ ...u, first_name: e.target.value }))
+            }
+            placeholder="First name"
+          />
+          <input
+            value={userForm.last_name}
+            onChange={(e) =>
+              setUserForm((u) => ({ ...u, last_name: e.target.value }))
+            }
+            placeholder="Last name"
+          />
+          <input
+            value={userForm.full_name}
+            onChange={(e) =>
+              setUserForm((u) => ({ ...u, full_name: e.target.value }))
+            }
+            placeholder="Full name"
+          />
+          <input
+            value={userForm.city}
+            onChange={(e) => setUserForm((u) => ({ ...u, city: e.target.value }))}
+            placeholder="City"
+          />
+          <input
+            value={userForm.mobile}
+            onChange={(e) =>
+              setUserForm((u) => ({ ...u, mobile: e.target.value }))
+            }
+            placeholder="Mobile"
+          />
+          <input
+            value={userForm.dob}
+            onChange={(e) => setUserForm((u) => ({ ...u, dob: e.target.value }))}
+            placeholder="DOB"
+          />
+          <input
+            value={userForm.gender}
+            onChange={(e) =>
+              setUserForm((u) => ({ ...u, gender: e.target.value }))
+            }
+            placeholder="Gender"
+          />
+          <input
+            value={userForm.policynum}
+            onChange={(e) =>
+              setUserForm((u) => ({ ...u, policynum: e.target.value }))
+            }
+            placeholder="Policy number"
+          />
+          <input
+            value={userForm.clntid}
+            onChange={(e) =>
+              setUserForm((u) => ({ ...u, clntid: e.target.value }))
+            }
+            placeholder="Client ID"
+          />
+        </div>
+        <div className="actions space-top">
+          <button className="primary" onClick={handleUserCreate}>
+            Add / Update User
+          </button>
+        </div>
+
+        {userError && <span className="hint">{userError}</span>}
+
+        <div className="table space-top">
+          <div className="table-row header">
+            <div>ID</div>
+            <div>Name</div>
+            <div>City</div>
+            <div>Mobile</div>
+            <div>Actions</div>
+          </div>
+          {users.length === 0 ? (
+            <div className="table-row empty">No users yet.</div>
+          ) : (
+            users.map((u) => {
+              const key = String(u.id);
+              const name =
+                u.full_name || [u.first_name, u.last_name].filter(Boolean).join(" ");
+              return (
+                <div key={key}>
+                  <div className="table-row">
+                    <div className="mono">{u.id}</div>
+                    <div>{name || "-"}</div>
+                    <div>{u.city || "-"}</div>
+                    <div>{u.mobile || "-"}</div>
+                    <div className="actions">
+                      <button className="ghost icon-button" onClick={() => toggleUserRow(key)}>
+                        {userExpanded.has(key) ? "▾" : "▸"}
+                      </button>
+                      <button
+                        className="ghost icon-button"
+                        onClick={() => handleUserSync(key)}
+                        title="Sync"
+                        disabled={!!userSyncing[key]}
+                      >
+                        {userSyncing[key] ? <span className="spinner small" /> : "⟳"}
+                      </button>
+                      <button
+                        className="ghost icon-button danger"
+                        onClick={() => handleUserDelete(key)}
+                        title="Delete"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                  {userExpanded.has(key) && (
+                    <div className="table-row detail">
+                      <div className="mono">Details</div>
+                      <div className="detail-grid">
+                        <div>Policy: {u.policynum || "-"}</div>
+                        <div>Client ID: {u.clntid || "-"}</div>
+                        <div>DOB: {u.dob || "-"}</div>
+                        <div>Gender: {u.gender || "-"}</div>
+                        <div>Address: {[u.addr1, u.addr2, u.city].filter(Boolean).join(", ") || "-"}</div>
+                      </div>
+                      <div className="detail-span">
+                        Full Name: {u.full_name || name || "-"}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </section>
+)}
     </div>
   );
 }

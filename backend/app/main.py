@@ -1,6 +1,7 @@
 from time import perf_counter
 from typing import Optional, Dict, Any, List
-from fastapi import FastAPI
+import re
+from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -28,10 +29,30 @@ from .app_db import (
     get_products_by_ids,
     iter_products,
 )
+from .user_db import (
+    init_user_db,
+    upsert_user,
+    delete_user,
+    get_user,
+    list_users,
+    search_users,
+    search_by_mobile_suffix,
+    search_by_mobile_suffixes,
+    search_by_age_range,
+    search_by_numeric_range,
+    search_by_date_range,
+    import_users_csv,
+)
+from .user_vector_store import (
+    upsert_user_embedding,
+    delete_user_embedding,
+    search_user_embeddings,
+)
 
 
 app = FastAPI(title="Amazon Products RAG (Local Ollama + Chroma)")
 init_db()
+init_user_db()
 
 # CORS for any frontend origin
 app.add_middleware(
@@ -112,6 +133,51 @@ class ProductImportRequest(BaseModel):
     skip_existing: bool = True
     sync_embeddings: bool = False
     reset_vector: bool = False
+
+
+class UserModel(BaseModel):
+    id: Optional[str] = None
+    comcode: Optional[str] = None
+    policynum: Optional[str] = None
+    agency: Optional[str] = None
+    ridernum: Optional[str] = None
+    plancode: Optional[str] = None
+    comkey: Optional[str] = None
+    last_name: Optional[str] = None
+    first_name: Optional[str] = None
+    full_name: Optional[str] = None
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    poltype: Optional[str] = None
+    crole: Optional[str] = None
+    age: Optional[str] = None
+    issue_date: Optional[str] = None
+    addr1: Optional[str] = None
+    addr2: Optional[str] = None
+    city: Optional[str] = None
+    mobile: Optional[str] = None
+    father_name: Optional[str] = None
+    clttype: Optional[str] = None
+    ben_seq_no: Optional[str] = None
+    remarks: Optional[str] = None
+    rrn: Optional[str] = None
+    nid: Optional[str] = None
+    clntid: Optional[str] = None
+
+
+class UserImportRequest(BaseModel):
+    csv_path: str = "./data/user_data.csv"
+    limit: Optional[int] = None
+    skip_existing: bool = True
+
+
+class UserIndexRequest(BaseModel):
+    limit: Optional[int] = None
+
+
+class UserSemanticSearchRequest(BaseModel):
+    query: str
+    k: int = 5
 
 
 class SearchRequest(BaseModel):
@@ -197,6 +263,252 @@ def export_dataset(req: ExportCsvRequest):
         limit=req.limit,
         keyword=keyword,
     )
+
+
+@app.get("/users")
+def read_users(
+    limit: int = 50,
+    offset: int = 0,
+    id: Optional[str] = None,
+    comcode: Optional[str] = None,
+    policynum: Optional[str] = None,
+    agency: Optional[str] = None,
+    ridernum: Optional[str] = None,
+    plancode: Optional[str] = None,
+    comkey: Optional[str] = None,
+    last_name: Optional[str] = None,
+    first_name: Optional[str] = None,
+    full_name: Optional[str] = None,
+    dob: Optional[str] = None,
+    gender: Optional[str] = None,
+    poltype: Optional[str] = None,
+    crole: Optional[str] = None,
+    age: Optional[str] = None,
+    issue_date: Optional[str] = None,
+    addr1: Optional[str] = None,
+    addr2: Optional[str] = None,
+    city: Optional[str] = None,
+    mobile: Optional[str] = None,
+    father_name: Optional[str] = None,
+    clttype: Optional[str] = None,
+    ben_seq_no: Optional[str] = None,
+    remarks: Optional[str] = None,
+    rrn: Optional[str] = None,
+    nid: Optional[str] = None,
+    clntid: Optional[str] = None,
+):
+    filters = {
+        "id": id,
+        "comcode": comcode,
+        "policynum": policynum,
+        "agency": agency,
+        "ridernum": ridernum,
+        "plancode": plancode,
+        "comkey": comkey,
+        "last_name": last_name,
+        "first_name": first_name,
+        "full_name": full_name,
+        "dob": dob,
+        "gender": gender,
+        "poltype": poltype,
+        "crole": crole,
+        "age": age,
+        "issue_date": issue_date,
+        "addr1": addr1,
+        "addr2": addr2,
+        "city": city,
+        "mobile": mobile,
+        "father_name": father_name,
+        "clttype": clttype,
+        "ben_seq_no": ben_seq_no,
+        "remarks": remarks,
+        "rrn": rrn,
+        "nid": nid,
+        "clntid": clntid,
+    }
+    rows = list_users(limit=limit, offset=offset, filters=filters)
+    return {"status": "ok", "count": len(rows), "users": rows}
+
+
+@app.get("/users/{user_id}")
+def read_user(user_id: str):
+    row = get_user(user_id)
+    if not row:
+        return {"status": "not_found", "id": user_id}
+    return {"status": "ok", "user": row}
+
+
+@app.post("/users")
+def create_user(user: UserModel):
+    if not user.id:
+        return {"status": "error", "error": "id is required"}
+    row = upsert_user(user.dict(exclude_none=True))
+    return {"status": "ok", "user": row}
+
+
+@app.put("/users/{user_id}")
+def update_user(user_id: str, user: UserModel):
+    data = user.dict(exclude_none=True)
+    data["id"] = user_id
+    row = upsert_user(data)
+    return {"status": "ok", "user": row}
+
+
+@app.post("/users/{user_id}/sync")
+def sync_user_embedding(user_id: str):
+    row = get_user(user_id)
+    if not row:
+        return {"status": "not_found", "id": user_id}
+    synced = upsert_user_embedding(row)
+    return {"status": "ok", "id": user_id, "embedding_synced": synced}
+
+
+@app.delete("/users/{user_id}")
+def remove_user(user_id: str):
+    deleted = delete_user(user_id)
+    embedding_deleted = delete_user_embedding(user_id)
+    return {
+        "status": "ok",
+        "deleted": deleted,
+        "embedding_deleted": embedding_deleted,
+    }
+
+
+@app.post("/users/import")
+def import_users(req: UserImportRequest):
+    out = import_users_csv(
+        req.csv_path, limit=req.limit, skip_existing=req.skip_existing
+    )
+    return {"status": "ok", **out}
+
+
+@app.post("/users/search")
+def search_users_endpoint(query: str, limit: int = 50, offset: int = 0):
+    rows = search_users(query=query, limit=limit, offset=offset)
+    return {"status": "ok", "count": len(rows), "users": rows}
+
+
+@app.post("/users/index")
+def index_users(req: UserIndexRequest):
+    rows = list_users(limit=req.limit or 10000, offset=0, filters={})
+    synced = 0
+    for row in rows:
+        if upsert_user_embedding(row):
+            synced += 1
+    return {"status": "ok", "synced": synced}
+
+
+@app.post("/users/search/semantic")
+@app.get("/users/search/semantic")
+def semantic_search_users(
+    query: str = "",
+    k: int = 5,
+    req: Optional[UserSemanticSearchRequest] = Body(None),
+):
+    if req:
+        query = req.query or query
+        k = req.k or k
+    q = (query or "").lower()
+    numbers = re.findall(r"\d+", q)
+    if "user id" in q or ("user" in q and "id" in q):
+        if numbers:
+            rows = search_by_numeric_range(
+                "id", int(numbers[0]), int(numbers[0]), limit=k, offset=0
+            )
+            return {"status": "ok", "query": query, "results": rows, "matched": "user_id"}
+    if "father id" in q or ("father" in q and "id" in q):
+        if numbers:
+            rows = search_by_numeric_range(
+                "id", int(numbers[0]), int(numbers[0]), limit=k, offset=0
+            )
+            return {
+                "status": "ok",
+                "query": query,
+                "results": rows,
+                "matched": "father_id",
+            }
+    wants_suffix = ("last" in q and "digit" in q) or ("ends with" in q) or ("ending" in q)
+    if wants_suffix and numbers:
+        rows = search_by_mobile_suffixes(numbers, limit=k)
+        return {
+            "status": "ok",
+            "query": query,
+            "results": rows,
+            "matched": "mobile_suffix",
+        }
+    if "date" in q or "dob" in q or "issue" in q:
+        dates = re.findall(r"\d{4}-\d{2}-\d{2}", q)
+        start_date = dates[0] if len(dates) > 0 else None
+        end_date = dates[1] if len(dates) > 1 else None
+        field = "dob" if "dob" in q else "issue_date"
+        if dates:
+            rows = search_by_date_range(field, start_date, end_date, limit=k, offset=0)
+            return {"status": "ok", "query": query, "results": rows, "matched": "date_range"}
+    if "age" in q:
+        min_match = re.search(r"(?:min|minimum|at least|over|above)\s*(\d+)", q)
+        max_match = re.search(r"(?:max|maximum|under|below|less than)\s*(\d+)", q)
+        min_age = int(min_match.group(1)) if min_match else None
+        max_age = int(max_match.group(1)) if max_match else None
+        if min_age is None and max_age is None and numbers:
+            if len(numbers) >= 2:
+                min_age = int(numbers[0])
+                max_age = int(numbers[1])
+            elif len(numbers) == 1:
+                min_age = int(numbers[0])
+        rows = search_by_age_range(min_age=min_age, max_age=max_age, limit=k, offset=0)
+        return {"status": "ok", "query": query, "results": rows, "matched": "age_range"}
+    if "nid" in q or "clntid" in q or "policy" in q or "policynum" in q:
+        field = "nid"
+        if "clntid" in q:
+            field = "clntid"
+        elif "policy" in q or "policynum" in q:
+            field = "policynum"
+        min_match = re.search(r"(?:min|minimum|at least|over|above)\s*(\d+)", q)
+        max_match = re.search(r"(?:max|maximum|under|below|less than)\s*(\d+)", q)
+        min_val = int(min_match.group(1)) if min_match else None
+        max_val = int(max_match.group(1)) if max_match else None
+        if min_val is not None or max_val is not None:
+            rows = search_by_numeric_range(field, min_val, max_val, limit=k, offset=0)
+            return {"status": "ok", "query": query, "results": rows, "matched": "numeric_range"}
+        if numbers:
+            # partial match on numeric fields (e.g., NID contains 533)
+            rows = search_users(query=numbers[0], limit=k, offset=0)
+            return {"status": "ok", "query": query, "results": rows, "matched": "numeric_partial"}
+    # If query looks like a direct field/value search, use SQL LIKE across all columns.
+    if numbers or any(
+        key in q
+        for key in [
+            "address",
+            "addr",
+            "city",
+            "mobile",
+            "phone",
+            "nid",
+            "policy",
+            "id",
+            "dob",
+            "date",
+            "gender",
+        ]
+    ):
+        rows = search_users(query=query, limit=k, offset=0)
+        return {"status": "ok", "query": query, "results": rows, "matched": "sql"}
+    results = search_user_embeddings(query=query, k=k)
+    out = []
+    for doc, score in results:
+        md = doc.metadata or {}
+        out.append(
+            {
+                "id": md.get("id"),
+                "full_name": md.get("full_name"),
+                "first_name": md.get("first_name"),
+                "last_name": md.get("last_name"),
+                "city": md.get("city"),
+                "mobile": md.get("mobile"),
+                "score": score,
+            }
+        )
+    return {"status": "ok", "query": query, "results": out}
 
 
 @app.post("/products")

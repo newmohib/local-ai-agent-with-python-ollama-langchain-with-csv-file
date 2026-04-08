@@ -388,6 +388,64 @@ Frontend supports:
 - `PUT /products/{parent_asin}`
 - `DELETE /products/{parent_asin}`
 - `POST /products/import`
+- `GET /users`
+- `GET /users/{id}`
+- `POST /users`
+- `PUT /users/{id}`
+- `DELETE /users/{id}`
+- `POST /users/import`
+- `POST /users/search`
+- `POST /users/{id}/sync`
+- `POST /users/index`
+- `POST /users/search/semantic`
+
+## Users Module (CSV -> SQLite + Search)
+
+User CSV file:
+
+```
+backend/data/user_data.csv
+```
+
+Import users from CSV (skip existing by `id`):
+
+```bash
+curl -X POST http://localhost:9000/users/import \
+  -H "Content-Type: application/json" \
+  -d '{\"csv_path\": \"./data/user_data.csv\", \"limit\": 1000, \"skip_existing\": true}'
+```
+
+Search across any column (also matches `first_name + last_name` when full name is provided):
+
+```bash
+curl -X POST "http://localhost:9000/users/search?query=kamal%20mia&limit=50&offset=0"
+```
+
+Filter by any column:
+
+```bash
+curl "http://localhost:9000/users?first_name=kamal&city=Rajshahi"
+```
+
+Sync user embeddings:
+
+```bash
+curl -X POST http://localhost:9000/users/1/sync
+```
+
+Bulk sync all users to vector DB:
+
+```bash
+curl -X POST http://localhost:9000/users/index \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 10000}'
+```
+
+Semantic search over users:
+
+```bash
+curl -X POST "http://localhost:9000/users/search/semantic?query=kamal%20mia&k=5"
+```
 
 ## Troubleshooting
 

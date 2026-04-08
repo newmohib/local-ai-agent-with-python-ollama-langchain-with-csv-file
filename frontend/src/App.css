@@ -64,6 +64,27 @@ body {
   max-width: 520px;
 }
 
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tab {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.tab.active {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 179, 71, 0.5);
+}
+
 .status {
   margin-top: 10px;
   color: var(--muted);
@@ -199,6 +220,43 @@ button:disabled {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
+}
+
+.btn-soft {
+  background: rgba(93, 228, 199, 0.12);
+  border: 1px solid rgba(93, 228, 199, 0.35);
+  color: var(--accent-2);
+  box-shadow: 0 8px 18px rgba(93, 228, 199, 0.15);
+}
+
+.btn-soft:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-medium {
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+.btn-half {
+  width: 50%;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.row input {
+  flex: 1;
+  height: 44px;
+}
+
+.row .btn-soft {
+  min-width: 180px;
+  height: 44px;
+  padding: 0 16px;
 }
 
 .k-control {

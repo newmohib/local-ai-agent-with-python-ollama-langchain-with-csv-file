@@ -200,3 +200,98 @@ export async function importProducts({
   if (!res.ok) throw new Error("Import products failed");
   return res.json();
 }
+
+export async function listUsers({ limit = 50, offset = 0, filters = {} } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    ...filters,
+  });
+  const res = await fetch(`${API_BASE}/users?${params.toString()}`);
+  if (!res.ok) throw new Error("List users failed");
+  return res.json();
+}
+
+export async function searchUsers({ query, limit = 50, offset = 0 } = {}) {
+  const res = await fetch(
+    `${API_BASE}/users/search?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(
+      limit
+    )}&offset=${encodeURIComponent(offset)}`
+  );
+  if (!res.ok) throw new Error("Search users failed");
+  return res.json();
+}
+
+export async function createUser(user) {
+  const res = await fetch(`${API_BASE}/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(user),
+  });
+  if (!res.ok) throw new Error("Create user failed");
+  return res.json();
+}
+
+export async function updateUser(id, updates) {
+  const res = await fetch(`${API_BASE}/users/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, ...updates }),
+  });
+  if (!res.ok) throw new Error("Update user failed");
+  return res.json();
+}
+
+export async function deleteUser(id) {
+  const res = await fetch(`${API_BASE}/users/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Delete user failed");
+  return res.json();
+}
+
+export async function importUsers({
+  csvPath = "./data/user_data.csv",
+  limit = 1000,
+  skipExisting = true,
+} = {}) {
+  const res = await fetch(`${API_BASE}/users/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      csv_path: csvPath,
+      limit,
+      skip_existing: skipExisting,
+    }),
+  });
+  if (!res.ok) throw new Error("Import users failed");
+  return res.json();
+}
+
+export async function syncUserEmbedding(id) {
+  const res = await fetch(`${API_BASE}/users/${id}/sync`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Sync user embedding failed");
+  return res.json();
+}
+
+export async function syncUsersEmbeddings({ limit = 10000 } = {}) {
+  const res = await fetch(`${API_BASE}/users/index`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit }),
+  });
+  if (!res.ok) throw new Error("Sync users embeddings failed");
+  return res.json();
+}
+
+export async function semanticSearchUsers({ query, k = 5 } = {}) {
+  const res = await fetch(`${API_BASE}/users/search/semantic`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, k }),
+  });
+  if (!res.ok) throw new Error("Semantic search users failed");
+  return res.json();
+}
