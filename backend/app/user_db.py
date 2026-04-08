@@ -331,6 +331,35 @@ def search_by_age_range(
     return [dict(r) for r in rows]
 
 
+def search_by_field_and_age(
+    field: str,
+    term: str,
+    min_age: Optional[int],
+    max_age: Optional[int],
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    if field not in DB_COLUMNS:
+        return []
+    clauses = [f"lower({field}) like ?"]
+    params: List[Any] = [f"%{(term or '').lower()}%"]
+    if min_age is not None:
+        clauses.append("cast(age as integer) >= ?")
+        params.append(min_age)
+    if max_age is not None:
+        clauses.append("cast(age as integer) <= ?")
+        params.append(max_age)
+    where = " and ".join(clauses)
+    sql = f"select * from users where {where} order by id asc limit ? offset ?"
+    params.extend([limit, offset])
+    con = _connect()
+    try:
+        rows = con.execute(sql, params).fetchall()
+    finally:
+        con.close()
+    return [dict(r) for r in rows]
+
+
 def search_by_numeric_range(
     field: str,
     min_val: Optional[int],

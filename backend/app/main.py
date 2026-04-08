@@ -42,6 +42,7 @@ from .user_db import (
     search_by_numeric_range,
     search_by_date_range,
     import_users_csv,
+    search_by_field_and_age,
 )
 from .user_vector_store import (
     upsert_user_embedding,
@@ -455,6 +456,42 @@ def semantic_search_users(
                 max_age = int(numbers[1])
             elif len(numbers) == 1:
                 min_age = int(numbers[0])
+        if "father" in q or "father name" in q:
+            stopwords = {
+                "father",
+                "name",
+                "is",
+                "will",
+                "be",
+                "and",
+                "age",
+                "minimum",
+                "maximum",
+                "min",
+                "max",
+                "under",
+                "over",
+                "below",
+                "above",
+                "less",
+                "than",
+            }
+            tokens = [t for t in re.findall(r"[a-z]+", q) if t not in stopwords]
+            term = " ".join(tokens).strip()
+            rows = search_by_field_and_age(
+                "father_name",
+                term,
+                min_age=min_age,
+                max_age=max_age,
+                limit=k,
+                offset=0,
+            )
+            return {
+                "status": "ok",
+                "query": query,
+                "results": rows,
+                "matched": "father_age",
+            }
         rows = search_by_age_range(min_age=min_age, max_age=max_age, limit=k, offset=0)
         return {"status": "ok", "query": query, "results": rows, "matched": "age_range"}
     if "nid" in q or "clntid" in q or "policy" in q or "policynum" in q:

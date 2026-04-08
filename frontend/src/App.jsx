@@ -54,6 +54,7 @@ export default function App() {
   const [userError, setUserError] = useState("");
   const [userSemanticQuery, setUserSemanticQuery] = useState("");
   const [userSemanticResults, setUserSemanticResults] = useState([]);
+  const [userSemanticActive, setUserSemanticActive] = useState(false);
   const [userForm, setUserForm] = useState({
     id: "",
     first_name: "",
@@ -89,7 +90,7 @@ export default function App() {
     main_category: "",
     store: "",
   });
-  const userExtraCols = userSemanticResults.length > 0
+  const userExtraCols = userSemanticActive
     ? getUserExtraColumns(userSemanticQuery)
     : [];
   const userGridTemplate = [
@@ -135,9 +136,13 @@ export default function App() {
       { keys: ["remarks"], key: "remarks", label: "Remarks" },
     ];
     const picked = [];
+    const baseCols = new Set(["full_name", "city", "mobile"]);
     for (const item of candidates) {
       if (picked.length >= 2) break;
       if (item.keys.some((k) => q.includes(k))) {
+        if (baseCols.has(item.key)) {
+          continue;
+        }
         if (!picked.find((p) => p.key === item.key)) {
           picked.push(item);
         }
@@ -381,6 +386,7 @@ export default function App() {
       setUserError("");
       if (!userSemanticQuery.trim()) {
         setUserSemanticResults([]);
+        setUserSemanticActive(false);
         return;
       }
       const out = await semanticSearchUsers({
@@ -388,9 +394,16 @@ export default function App() {
         k: 5,
       });
       setUserSemanticResults(out.results || []);
+      setUserSemanticActive(true);
     } catch (e) {
       setUserError(String(e));
     }
+  }
+
+  function handleUserSemanticReset() {
+    setUserSemanticQuery("");
+    setUserSemanticResults([]);
+    setUserSemanticActive(false);
   }
 
   async function handleUserCreate() {
@@ -1269,11 +1282,23 @@ export default function App() {
         </div>
 
         <div className="row space-top">
-          <input
-            value={userSemanticQuery}
-            onChange={(e) => setUserSemanticQuery(e.target.value)}
-            placeholder="Semantic search (e.g., Kamal from Rajshahi)"
-          />
+          <div className="input-wrap">
+            <input
+              value={userSemanticQuery}
+              onChange={(e) => setUserSemanticQuery(e.target.value)}
+              placeholder="Semantic search (e.g., Kamal from Rajshahi)"
+            />
+            {userSemanticQuery && (
+              <button
+                className="input-reset"
+                onClick={handleUserSemanticReset}
+                aria-label="Clear search"
+                title="Clear"
+              >
+                ✕
+              </button>
+            )}
+          </div>
           <button
             className="btn-soft btn-medium"
             onClick={handleUserSemanticSearch}
@@ -1295,10 +1320,10 @@ export default function App() {
             ))}
             <div>Actions</div>
           </div>
-          {(userSemanticResults.length > 0 ? userSemanticResults : users).length === 0 ? (
+          {(userSemanticActive ? userSemanticResults : users).length === 0 ? (
             <div className="table-row empty">No users found.</div>
           ) : (
-            (userSemanticResults.length > 0 ? userSemanticResults : users).map((u) => {
+            (userSemanticActive ? userSemanticResults : users).map((u) => {
               const key = String(u.id);
               const name =
                 u.full_name || [u.first_name, u.last_name].filter(Boolean).join(" ");
