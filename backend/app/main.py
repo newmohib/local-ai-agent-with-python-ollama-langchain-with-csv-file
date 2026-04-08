@@ -36,6 +36,7 @@ from .user_db import (
     get_user,
     list_users,
     search_users,
+    search_users_boolean,
     search_by_mobile_suffix,
     search_by_mobile_suffixes,
     search_by_age_range,
@@ -410,6 +411,9 @@ def semantic_search_users(
         query = req.query or query
         k = req.k or k
     q = (query or "").lower()
+    boolean_rows = search_users_boolean(query=query, limit=k, offset=0)
+    if boolean_rows is not None:
+        return {"status": "ok", "query": query, "results": boolean_rows, "matched": "boolean"}
     numbers = re.findall(r"\d+", q)
     if "user id" in q or ("user" in q and "id" in q):
         if numbers:

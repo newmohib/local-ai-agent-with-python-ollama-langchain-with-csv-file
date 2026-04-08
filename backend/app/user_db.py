@@ -248,6 +248,184 @@ def search_users(
     return [dict(r) for r in rows]
 
 
+def search_users_boolean(
+    query: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> Optional[List[Dict[str, Any]]]:
+    q = (query or "").strip().lower()
+    if not q:
+        return None
+
+    if " and " not in q and " or " not in q:
+        return None
+
+    field_map = {
+        "city": "city",
+        "mobile": "mobile",
+        "phone": "mobile",
+        "nid": "nid",
+        "policy": "policynum",
+        "policynum": "policynum",
+        "clntid": "clntid",
+        "client": "clntid",
+        "id": "id",
+        "dob": "dob",
+        "date": "issue_date",
+        "issue": "issue_date",
+        "gender": "gender",
+        "age": "age",
+        "father": "father_name",
+        "fathername": "father_name",
+        "name": "full_name",
+        "fullname": "full_name",
+        "first": "first_name",
+        "last": "last_name",
+        "address": "addr1",
+        "addr": "addr1",
+        "remarks": "remarks",
+    }
+
+    stopwords = {
+        "provide",
+        "list",
+        "data",
+        "user",
+        "users",
+        "where",
+        "is",
+        "will",
+        "be",
+        "minimum",
+        "maximum",
+        "min",
+        "max",
+        "between",
+        "the",
+        "a",
+        "an",
+        "of",
+        "in",
+        "show",
+        "get",
+        "with",
+        "for",
+        "and",
+        "or",
+        "under",
+        "over",
+        "below",
+        "above",
+        "less",
+        "than",
+        "at",
+        "least",
+        "ending",
+        "ends",
+        "last",
+        "digit",
+        "father",
+        "name",
+    }
+
+    def _extract_field(clause: str) -> Optional[str]:
+        tokens = re.findall(r"[a-z0-9]+", clause)
+        for t in tokens:
+            if t in field_map:
+                return field_map[t]
+        return None
+
+    def _extract_term(clause: str) -> str:
+        tokens = [t for t in re.findall(r"[a-z0-9]+", clause) if t not in stopwords]
+        return " ".join(tokens).strip()
+
+    def _parse_clause(clause: str) -> Optional[tuple[str, list[Any]]]:
+        field = _extract_field(clause)
+        if not field:
+            return None
+
+        numbers = re.findall(r"\d+", clause)
+
+        if field == "age":
+            min_match = re.search(r"(?:min|minimum|at least|over|above)\s*(\d+)", clause)
+            max_match = re.search(
+                r"(?:max|maximum|under|below|less than)\s*(\d+)", clause
+            )
+            min_age = int(min_match.group(1)) if min_match else None
+            max_age = int(max_match.group(1)) if max_match else None
+            if min_age is None and max_age is None and numbers:
+                if len(numbers) >= 2:
+                    min_age = int(numbers[0])
+                    max_age = int(numbers[1])
+                else:
+                    min_age = int(numbers[0])
+                    max_age = int(numbers[0])
+            clauses = []
+            params: List[Any] = []
+            if min_age is not None:
+                clauses.append("cast(coalesce(nullif(age,''),'0') as integer) >= ?")
+                params.append(min_age)
+            if max_age is not None:
+                clauses.append("cast(coalesce(nullif(age,''),'0') as integer) <= ?")
+                params.append(max_age)
+            if not clauses:
+                return None
+            return "(" + " and ".join(clauses) + ")", params
+
+        if field in {"dob", "issue_date"}:
+            dates = re.findall(r"\d{4}-\d{2}-\d{2}", clause)
+            if dates:
+                if len(dates) >= 2:
+                    return (
+                        f"({field} >= ? and {field} <= ?)",
+                        [dates[0], dates[1]],
+                    )
+                return (f"{field} = ?", [dates[0]])
+
+        if field == "mobile" and ("last" in clause and "digit" in clause) and numbers:
+            suffix = numbers[-1]
+            return ("mobile like ?", [f"%{suffix}"])
+
+        term = _extract_term(clause)
+        if term:
+            return (f"lower({field}) like ?", [f"%{term}%"])
+        return None
+
+    or_groups = [part.strip() for part in re.split(r"\s+or\s+", q) if part.strip()]
+    group_sqls: List[str] = []
+    params: List[Any] = []
+
+    for group in or_groups:
+        and_parts = [p.strip() for p in re.split(r"\s+and\s+", group) if p.strip()]
+        conds: List[str] = []
+        group_params: List[Any] = []
+        for clause in and_parts:
+            parsed = _parse_clause(clause)
+            if not parsed:
+                conds = []
+                group_params = []
+                break
+            sql, p = parsed
+            conds.append(sql)
+            group_params.extend(p)
+        if conds:
+            group_sqls.append("(" + " and ".join(conds) + ")")
+            params.extend(group_params)
+
+    if not group_sqls:
+        return None
+
+    where = " or ".join(group_sqls)
+    sql = f"select * from users where {where} order by id asc limit ? offset ?"
+    params.extend([limit, offset])
+    con = _connect()
+    try:
+        rows = con.execute(sql, params).fetchall()
+    finally:
+        con.close()
+    return [dict(r) for r in rows]
+
+
 def search_by_mobile_suffix(
     suffix: str,
     limit: int = 50,
@@ -314,10 +492,10 @@ def search_by_age_range(
     clauses = []
     params: List[Any] = []
     if min_age is not None:
-        clauses.append("cast(age as integer) >= ?")
+        clauses.append("cast(coalesce(nullif(age,''),'0') as integer) >= ?")
         params.append(min_age)
     if max_age is not None:
-        clauses.append("cast(age as integer) <= ?")
+        clauses.append("cast(coalesce(nullif(age,''),'0') as integer) <= ?")
         params.append(max_age)
     where = " and ".join(clauses)
     con = _connect()
@@ -344,10 +522,10 @@ def search_by_field_and_age(
     clauses = [f"lower({field}) like ?"]
     params: List[Any] = [f"%{(term or '').lower()}%"]
     if min_age is not None:
-        clauses.append("cast(age as integer) >= ?")
+        clauses.append("cast(coalesce(nullif(age,''),'0') as integer) >= ?")
         params.append(min_age)
     if max_age is not None:
-        clauses.append("cast(age as integer) <= ?")
+        clauses.append("cast(coalesce(nullif(age,''),'0') as integer) <= ?")
         params.append(max_age)
     where = " and ".join(clauses)
     sql = f"select * from users where {where} order by id asc limit ? offset ?"

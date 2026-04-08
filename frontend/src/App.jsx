@@ -1281,6 +1281,23 @@ export default function App() {
           </button>
         </div>
 
+        <div className="hint block space-top">
+          Supports queries like:
+          <div className="hint-list">
+            <div>city is rajshahi and age max 30</div>
+            <div>father name mohib and age maximum 40</div>
+            <div>nid contains 533 or mobile last 3 digit 002</div>
+            <div>gender is female and city dhaka or city rajshahi</div>
+          </div>
+          <div className="hint-line">
+            Parses AND within a group, and OR across groups.
+          </div>
+          <div className="hint-line">
+            Applies numeric ranges (age), date ranges (dob, issue_date), suffix match for
+            mobile, and partial text matches for all other fields.
+          </div>
+        </div>
+
         <div className="row space-top">
           <div className="input-wrap">
             <input
