@@ -452,6 +452,10 @@ def semantic_search_users(
     if "age" in q:
         min_match = re.search(r"(?:min|minimum|at least|over|above)\s*(\d+)", q)
         max_match = re.search(r"(?:max|maximum|under|below|less than)\s*(\d+)", q)
+        if not min_match:
+            min_match = re.search(r"(?:min|minimum|at least|over|above)\D+(\d+)", q)
+        if not max_match:
+            max_match = re.search(r"(?:max|maximum|under|below|less than)\D+(\d+)", q)
         min_age = int(min_match.group(1)) if min_match else None
         max_age = int(max_match.group(1)) if max_match else None
         if min_age is None and max_age is None and numbers:

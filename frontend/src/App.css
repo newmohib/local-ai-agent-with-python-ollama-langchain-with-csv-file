@@ -2,15 +2,15 @@
 
 :root {
   color-scheme: light;
-  --bg: #0b0f14;
-  --panel: #111823;
-  --panel-2: #0f1b2c;
-  --text: #e8f0ff;
-  --muted: #a2b2c8;
-  --accent: #ffb347;
-  --accent-2: #5de4c7;
-  --border: rgba(255, 255, 255, 0.08);
-  --glow: rgba(255, 179, 71, 0.15);
+  --bg: #eaf5ee;
+  --panel: #f6fbf7;
+  --panel-2: #eef7f0;
+  --text: #183023;
+  --muted: #4f6b5d;
+  --accent: #2f8f5b;
+  --accent-2: #2a9d6f;
+  --border: rgba(24, 48, 35, 0.12);
+  --glow: rgba(47, 143, 91, 0.18);
 }
 
 * {
@@ -19,7 +19,7 @@
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 10% -10%, #1b2332 0%, #0b0f14 60%);
+  background: radial-gradient(1200px 600px at 10% -10%, #d8efe2 0%, #f3fbf6 60%);
   color: var(--text);
   font-family: "Space Grotesk", system-ui, sans-serif;
 }
@@ -40,9 +40,9 @@ body {
   gap: 16px;
   padding: 24px;
   border-radius: 20px;
-  background: linear-gradient(135deg, #141b27 0%, #0e131b 60%);
+  background: linear-gradient(135deg, #e1f3e7 0%, #f6fbf7 60%);
   border: 1px solid var(--border);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 20px 60px rgba(31, 79, 52, 0.12);
 }
 
 .hero h1 {
@@ -81,8 +81,8 @@ body {
 
 .tab.active {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 179, 71, 0.5);
+  background: rgba(47, 143, 91, 0.12);
+  border-color: rgba(47, 143, 91, 0.35);
 }
 
 .status {
@@ -151,7 +151,7 @@ body {
 }
 
 input {
-  background: #0f1520;
+  background: #f3faf5;
   border: 1px solid var(--border);
   color: var(--text);
   padding: 12px 14px;
@@ -161,6 +161,20 @@ input {
 
 input:focus {
   border-color: rgba(255, 179, 71, 0.6);
+  box-shadow: 0 0 0 3px var(--glow);
+}
+
+textarea {
+  background: #f3faf5;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: 12px;
+  outline: none;
+}
+
+textarea:focus {
+  border-color: rgba(47, 143, 91, 0.6);
   box-shadow: 0 0 0 3px var(--glow);
 }
 
@@ -340,15 +354,15 @@ button:disabled {
 }
 
 .result-card {
-  background: #0c121a;
+  background: var(--panel);
   border-radius: 16px;
   border: 1px solid var(--border);
   padding: 16px;
 }
 
 .result-card.alt {
-  background: var(--panel-2);
-  border-color: rgba(93, 228, 199, 0.2);
+  background: #e8f4ec;
+  border-color: rgba(47, 143, 91, 0.18);
 }
 
 .result-head {
