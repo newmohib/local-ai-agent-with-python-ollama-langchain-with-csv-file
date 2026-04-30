@@ -46,6 +46,16 @@ DB_SCHEMA = (
 )
 
 
+def _gender_values_from_text(text: str) -> List[str]:
+    q = (text or "").lower()
+    values: List[str] = []
+    if re.search(r"\bmale\b", q) or re.search(r"\bm\b", q):
+        values.append("m")
+    if re.search(r"\bfemale\b", q) or re.search(r"\bf\b", q):
+        values.append("f")
+    return values
+
+
 def _connect() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(USER_DB_PATH) or ".", exist_ok=True)
     con = sqlite3.connect(USER_DB_PATH, timeout=3)
@@ -225,21 +235,46 @@ def search_users(
             }
             rest = [t for t in tokens if t not in field_map and t not in stopwords]
             term = " ".join(rest) if rest else q
-            like = f"%{term}%"
-            rows = con.execute(
-                f"select * from users where lower({field}) like ? order by id asc limit ? offset ?",
-                (like, limit, offset),
-            ).fetchall()
+            if field == "gender":
+                gender_values = _gender_values_from_text(term or q)
+                if gender_values:
+                    placeholders = ", ".join(["?"] * len(gender_values))
+                    rows = con.execute(
+                        f"select * from users where lower(gender) in ({placeholders}) order by id asc limit ? offset ?",
+                        (*gender_values, limit, offset),
+                    ).fetchall()
+                else:
+                    like = f"%{term}%"
+                    rows = con.execute(
+                        f"select * from users where lower({field}) like ? order by id asc limit ? offset ?",
+                        (like, limit, offset),
+                    ).fetchall()
+            else:
+                like = f"%{term}%"
+                rows = con.execute(
+                    f"select * from users where lower({field}) like ? order by id asc limit ? offset ?",
+                    (like, limit, offset),
+                ).fetchall()
         else:
+            gender_values = _gender_values_from_text(q)
+            text_tokens = tokens[:]
+            if gender_values:
+                text_tokens = [
+                    t for t in text_tokens if t not in {"male", "female", "m", "f", "gender"}
+                ]
             clauses = [
                 "(" + " or ".join([f"lower({col}) like ?" for col in DB_COLUMNS]) + ")"
-                for _ in tokens
+                for _ in text_tokens
             ]
             params = []
-            for t in tokens:
+            for t in text_tokens:
                 like = f"%{t}%"
                 params.extend([like for _ in DB_COLUMNS])
-            where = " and ".join(clauses)
+            where = " and ".join(clauses) if clauses else "1=1"
+            if gender_values:
+                placeholders = ", ".join(["?"] * len(gender_values))
+                where = f"({where}) and lower(gender) in ({placeholders})"
+                params.extend(gender_values)
             sql = f"select * from users where {where} order by id asc limit ? offset ?"
             params.extend([limit, offset])
             rows = con.execute(sql, params).fetchall()
@@ -351,8 +386,15 @@ def search_users_boolean(
             max_match = re.search(
                 r"(?:max|maximum|under|below|less than)\s*(\d+)", clause
             )
+            exact_match = re.search(r"(?:^|\\b)age\\s*(?:is|=)?\\s*(\\d+)\\b", clause)
             min_age = int(min_match.group(1)) if min_match else None
             max_age = int(max_match.group(1)) if max_match else None
+            if exact_match and min_age is None and max_age is None:
+                exact_age = int(exact_match.group(1))
+                return (
+                    "cast(coalesce(nullif(age,''),'0') as integer) = ?",
+                    [exact_age],
+                )
             if min_age is None and max_age is None and numbers:
                 if len(numbers) >= 2:
                     min_age = int(numbers[0])
@@ -371,6 +413,12 @@ def search_users_boolean(
             if not clauses:
                 return None
             return "(" + " and ".join(clauses) + ")", params
+
+        if field == "gender":
+            gender_values = _gender_values_from_text(clause)
+            if gender_values:
+                placeholders = ", ".join(["?"] * len(gender_values))
+                return (f"lower(gender) in ({placeholders})", gender_values)
 
         if field in {"dob", "issue_date"}:
             dates = re.findall(r"\d{4}-\d{2}-\d{2}", clause)
@@ -530,6 +578,80 @@ def search_by_field_and_age(
     where = " and ".join(clauses)
     sql = f"select * from users where {where} order by id asc limit ? offset ?"
     params.extend([limit, offset])
+    con = _connect()
+    try:
+        rows = con.execute(sql, params).fetchall()
+    finally:
+        con.close()
+    return [dict(r) for r in rows]
+
+
+def search_by_name_and_field(
+    field: str,
+    field_term: str,
+    name_term: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    if field not in DB_COLUMNS:
+        return []
+    field_term = (field_term or "").strip().lower()
+    name_term = (name_term or "").strip().lower()
+    if not field_term or not name_term:
+        return []
+
+    if field == "gender":
+        gender_values = _gender_values_from_text(field_term)
+        if not gender_values:
+            return []
+        placeholders = ", ".join(["?"] * len(gender_values))
+        sql = f"""
+            select *
+            from users
+            where lower(gender) in ({placeholders})
+              and (
+                lower(coalesce(full_name, '')) like ?
+                or lower(coalesce(first_name, '')) like ?
+                or lower(coalesce(last_name, '')) like ?
+              )
+            order by id asc
+            limit ? offset ?
+        """
+        params = [
+            *gender_values,
+            f"%{name_term}%",
+            f"%{name_term}%",
+            f"%{name_term}%",
+            limit,
+            offset,
+        ]
+        con = _connect()
+        try:
+            rows = con.execute(sql, params).fetchall()
+        finally:
+            con.close()
+        return [dict(r) for r in rows]
+
+    sql = f"""
+        select *
+        from users
+        where lower({field}) like ?
+          and (
+            lower(coalesce(full_name, '')) like ?
+            or lower(coalesce(first_name, '')) like ?
+            or lower(coalesce(last_name, '')) like ?
+          )
+        order by id asc
+        limit ? offset ?
+    """
+    params = [
+        f"%{field_term}%",
+        f"%{name_term}%",
+        f"%{name_term}%",
+        f"%{name_term}%",
+        limit,
+        offset,
+    ]
     con = _connect()
     try:
         rows = con.execute(sql, params).fetchall()

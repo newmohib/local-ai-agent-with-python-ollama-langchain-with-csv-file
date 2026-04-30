@@ -44,6 +44,7 @@ from .user_db import (
     search_by_date_range,
     import_users_csv,
     search_by_field_and_age,
+    search_by_name_and_field,
 )
 from .user_vector_store import (
     upsert_user_embedding,
@@ -414,6 +415,33 @@ def semantic_search_users(
     boolean_rows = search_users_boolean(query=query, limit=k, offset=0)
     if boolean_rows is not None:
         return {"status": "ok", "query": query, "results": boolean_rows, "matched": "boolean"}
+    with_match = re.search(
+        r"^\s*([a-z0-9 ,.'-]+?)\s+with\s+([a-z0-9 ,.'-]+?)\s+(city|gender|mobile|phone|nid|policy|policynum|clntid|father)\s*$",
+        q,
+    )
+    if with_match:
+        name_term = with_match.group(1).strip(" ,")
+        field_term = with_match.group(2).strip(" ,")
+        field_key = with_match.group(3)
+        field = {
+            "city": "city",
+            "gender": "gender",
+            "mobile": "mobile",
+            "phone": "mobile",
+            "nid": "nid",
+            "policy": "policynum",
+            "policynum": "policynum",
+            "clntid": "clntid",
+            "father": "father_name",
+        }[field_key]
+        rows = search_by_name_and_field(
+            field=field,
+            field_term=field_term,
+            name_term=name_term,
+            limit=k,
+            offset=0,
+        )
+        return {"status": "ok", "query": query, "results": rows, "matched": "name_with_field"}
     numbers = re.findall(r"\d+", q)
     if "user id" in q or ("user" in q and "id" in q):
         if numbers:
@@ -452,12 +480,17 @@ def semantic_search_users(
     if "age" in q:
         min_match = re.search(r"(?:min|minimum|at least|over|above)\s*(\d+)", q)
         max_match = re.search(r"(?:max|maximum|under|below|less than)\s*(\d+)", q)
+        exact_match = re.search(r"(?:^|\b)age\s*(?:is|=)?\s*(\d+)\b", q)
         if not min_match:
             min_match = re.search(r"(?:min|minimum|at least|over|above)\D+(\d+)", q)
         if not max_match:
             max_match = re.search(r"(?:max|maximum|under|below|less than)\D+(\d+)", q)
         min_age = int(min_match.group(1)) if min_match else None
         max_age = int(max_match.group(1)) if max_match else None
+        if exact_match and min_age is None and max_age is None:
+            exact_age = int(exact_match.group(1))
+            rows = search_by_age_range(min_age=exact_age, max_age=exact_age, limit=k, offset=0)
+            return {"status": "ok", "query": query, "results": rows, "matched": "age_exact"}
         if min_age is None and max_age is None and numbers:
             if len(numbers) >= 2:
                 min_age = int(numbers[0])
@@ -519,6 +552,11 @@ def semantic_search_users(
             # partial match on numeric fields (e.g., NID contains 533)
             rows = search_users(query=numbers[0], limit=k, offset=0)
             return {"status": "ok", "query": query, "results": rows, "matched": "numeric_partial"}
+    text_tokens = re.findall(r"[a-z0-9]+", q)
+    if text_tokens:
+        rows = search_users(query=query, limit=k, offset=0)
+        if rows:
+            return {"status": "ok", "query": query, "results": rows, "matched": "sql_text"}
     # If query looks like a direct field/value search, use SQL LIKE across all columns.
     if numbers or any(
         key in q

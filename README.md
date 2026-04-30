@@ -1,7 +1,8 @@
-<!-- codex resume 019c855e-6ebf-7602-8546-109a32c7aab1 -->
+<!-- -->
 <!-- and for sync create a button for and also insert all data from csv file to app_db -->
 <!-- 1. Background sync worker (queue-based) for large imports. -->
 <!--  If you want a progress bar for import/sync, I can wire it to the streaming /index/stream endpoint and show live progress. -->
+<!--  -->
 # Amazon Products RAG Search
 
 Local RAG product-search app using:
